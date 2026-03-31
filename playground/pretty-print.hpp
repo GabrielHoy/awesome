@@ -1,5 +1,3 @@
-#include <string>
-
 static inline constexpr const char* PRETTY_PRINT_LUAU_SOURCE = R"(
     -- Accumulate pretty printer output in `capturedoutput`
     capturedoutput = ""
