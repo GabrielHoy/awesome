@@ -1,0 +1,29 @@
+{
+  // Prefer clangd for C language features - `compile_commands.json`
+  "clangd.arguments": [
+    "--compile-commands-dir=${workspaceFolder}/build",
+    "--background-index",
+    "--clang-tidy",
+    "--completion-style=detailed",
+    "--header-insertion=iwyu",
+    "--header-insertion-decorators",
+    "--pch-storage=memory",
+    "--pretty"
+  ],
+
+  // Prevent duelling IntelliSense diagnostics (initially developed with Anysphere's C/C++ extension.)
+  "C_Cpp.intelliSenseEngine": "disabled",
+
+  // Let cpptools know where `compile_commands.json` lives
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+
+  // Nice-to-have defaults for navigation/search
+  "search.exclude": {
+    "**/build/**": true,
+    "**/build-asan/**": true
+  },
+  "files.watcherExclude": {
+    "**/build/**": true,
+    "**/build-asan/**": true
+  }
+}
