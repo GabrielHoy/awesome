@@ -479,4 +479,10 @@ add_dependencies(check check-qa check-examples)
 
 INCLUDE(${CMAKE_SOURCE_DIR}/Packaging.cmake)
 
+# TODO: REMOVE ME
+# 'playground' scratch area target so I can explore and play with the Luau C API for now.
+if(EXISTS "${CMAKE_SOURCE_DIR}/playground/CMakeLists.txt")
+    add_subdirectory(playground EXCLUDE_FROM_ALL)
+endif()
+
 # vim: filetype=cmake:expandtab:shiftwidth=4:tabstop=8:softtabstop=4:textwidth=80:foldmethod=marker
