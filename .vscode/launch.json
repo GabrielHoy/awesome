@@ -7,7 +7,7 @@
       "request": "launch",
       "program": "${workspaceFolder}/build/awesome",
       "args": ["--replace"],
-      "env": { "DISPLAY": ":1" },
+      "env": { "DISPLAY": ":1", "WAYLAND_DISPLAY": "" },
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "ninja: build (Debug)"
     },
@@ -19,6 +19,7 @@
       "args": ["--replace"],
       "env": {
         "DISPLAY": ":1",
+        "WAYLAND_DISPLAY": "",
         "ASAN_OPTIONS": "halt_on_error=0:print_stacktrace=1:log_path=/tmp/asan_awesome",
         "UBSAN_OPTIONS": "print_stacktrace=1:log_path=/tmp/ubsan_awesome"
       },
