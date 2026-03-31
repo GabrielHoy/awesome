@@ -3,4 +3,4 @@
 .*.sw?
 build
 .luacheckcache
-.claude
+plans/
