@@ -1,0 +1,29 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "awesome: Debug (Xephyr :1)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/awesome",
+      "args": ["--replace"],
+      "env": { "DISPLAY": ":1" },
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "ninja: build (Debug)"
+    },
+    {
+      "name": "awesome: ASan (Xephyr :1)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build-asan/awesome",
+      "args": ["--replace"],
+      "env": {
+        "DISPLAY": ":1",
+        "ASAN_OPTIONS": "halt_on_error=0:print_stacktrace=1:log_path=/tmp/asan_awesome",
+        "UBSAN_OPTIONS": "print_stacktrace=1:log_path=/tmp/ubsan_awesome"
+      },
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "ninja: build (ASan)"
+    }
+  ]
+}

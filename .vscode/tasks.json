@@ -1,0 +1,57 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "cmake: configure (Debug)",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "-S", "${workspaceFolder}",
+        "-B", "${workspaceFolder}/build",
+        "-G", "Ninja",
+        "-DCMAKE_BUILD_TYPE=Debug",
+        "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
+        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+      ],
+      "group": "build",
+      "presentation": { "reveal": "silent", "panel": "shared" }
+    },
+    {
+      "label": "cmake: configure (ASan)",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "-S", "${workspaceFolder}",
+        "-B", "${workspaceFolder}/build-asan",
+        "-G", "Ninja",
+        "-DCMAKE_BUILD_TYPE=Debug",
+        "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
+        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+        "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer",
+        "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"
+      ],
+      "group": "build",
+      "presentation": { "reveal": "silent", "panel": "shared" }
+    },
+    {
+      "label": "ninja: build (Debug)",
+      "type": "shell",
+      "command": "ninja",
+      "args": ["-C", "${workspaceFolder}/build"],
+      "group": { "kind": "build", "isDefault": true },
+      "dependsOn": "cmake: configure (Debug)",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "ninja: build (ASan)",
+      "type": "shell",
+      "command": "ninja",
+      "args": ["-C", "${workspaceFolder}/build-asan"],
+      "group": "build",
+      "dependsOn": "cmake: configure (ASan)",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": "$gcc"
+    }
+  ]
+}
