@@ -395,20 +395,24 @@ endif()
 
 #}}}
 
-# {{{ Check for LGI
-add_executable(lgi-check build-utils/lgi-check.c)
-set_target_properties(lgi-check PROPERTIES ENABLE_EXPORTS ON)
-target_link_libraries(lgi-check ${LUA_LIBRARIES})
-target_include_directories(lgi-check PRIVATE ${LUA_INCLUDE_DIR})
-add_custom_target(lgi-check-run ALL
-    COMMAND lgi-check
-    DEPENDS lgi-check
-    COMMENT "Checking for LGI...")
+# {{{ Quick check for LGI presence
+execute_process(
+    COMMAND ${LUA_EXECUTABLE} -e
+        "pcall(require, 'luarocks.loader') require('lgi') require('lgi.version')"
+    RESULT_VARIABLE LGI_CHECK_RESULT
+    ERROR_VARIABLE LGI_CHECK_ERR
+)
+if(NOT LGI_CHECK_RESULT EQUAL 0)
+    if(NOT DEFINED ENV{AWESOME_IGNORE_LGI})
+        message(FATAL_ERROR "LGI check failure: ${LGI_CHECK_ERR}")
+    endif()
+endif()
+
 # }}}
 
 # {{{ Generate some aggregated documentation from lua script
 
-add_custom_target(setup_directories DEPENDS lgi-check-run)
+add_custom_target(setup_directories)
 
 add_custom_command(TARGET setup_directories
         POST_BUILD
@@ -423,7 +427,6 @@ add_custom_command(
         COMMAND ${LUA_EXECUTABLE} ${SOURCE_DIR}/docs/06-appearance.md.lua
         ${BUILD_DIR}/docs/06-appearance.md
         DEPENDS
-            lgi-check-run
             ${SOURCE_DIR}/docs/06-appearance.md.lua
             ${SOURCE_DIR}/docs/_parser.lua
 )
@@ -442,7 +445,6 @@ foreach(RULE_TYPE client tag screen notification)
                  ${SOURCE_DIR}/docs/common/${RULE_TYPE}_rules_index.ldoc
 
         DEPENDS
-            lgi-check-run
             ${SOURCE_DIR}/docs/build_rules_index.lua
             ${SOURCE_DIR}/docs/_parser.lua
     )
