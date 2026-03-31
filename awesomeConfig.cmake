@@ -79,7 +79,35 @@ if(NOT ((LUA_FULL_VERSION VERSION_EQUAL 5.1.0 OR LUA_FULL_VERSION VERSION_GREATE
                         "https://awesomewm.org/apidoc/documentation/10-building-and-testing.md.html#Building")
 endif()
 
+# Luau - embedded via git submodule @ third-party/luau
+set(LUAU_SUBDIR "${SOURCE_DIR}/third-party/luau")
+if(NOT EXISTS "${LUAU_SUBDIR}/CMakeLists.txt")
+    message(FATAL_ERROR
+        "Luau submodule not initialised. Run the following:\n"
+        "  git submodule update --init third-party/luau")
+endif()
+
+# LUAU_EXTERN_C is required so lua.h / luacode.h exposes extern "C" symbols
+# callable from awesome's C translation units;
+# LUA_USE_LONGJMP (set automatically by LUAU_EXTERN_C) makes luaL_error use
+# longjmp instead of C++ exceptions, which is mandatory inside extern "C".
+set(LUAU_BUILD_CLI   OFF CACHE BOOL "Build Luau CLI tools"           FORCE)
+set(LUAU_BUILD_TESTS OFF CACHE BOOL "Build Luau tests"               FORCE)
+set(LUAU_BUILD_WEB   OFF CACHE BOOL "Build Luau web module"          FORCE)
+set(LUAU_EXTERN_C    ON  CACHE BOOL "Expose Luau C API via extern C" FORCE)
+set(LUAU_WERROR      OFF CACHE BOOL "Luau warnings as errors"        FORCE)
+
+add_subdirectory("${LUAU_SUBDIR}" "${CMAKE_BINARY_DIR}/luau" EXCLUDE_FROM_ALL)
+# Luau.VM and Luau.Compiler carry their own include directories via
+# target_include_directories; we also expose the paths explicitly for
+# configure_file / lgi-check use.
+set(LUAU_VM_INCLUDE_DIR       "${LUAU_SUBDIR}/VM/include")
+set(LUAU_COMPILER_INCLUDE_DIR "${LUAU_SUBDIR}/Compiler/include")
+message(STATUS "Luau -> ${LUAU_SUBDIR}")
+
 # }}}
+
+
 
 # {{{ Check if documentation can be build
 if(GENERATE_MANPAGES)
@@ -206,6 +234,13 @@ set(AWESOME_REQUIRED_INCLUDE_DIRS
     ${AWESOME_COMMON_REQUIRED_INCLUDE_DIRS}
     ${AWESOME_REQUIRED_INCLUDE_DIRS}
     ${LUA_INCLUDE_DIR})
+
+# (stdc++ is required here due to Luau's static
+# archives containing C++ object code.)
+list(APPEND AWESOME_REQUIRED_LDFLAGS Luau.VM Luau.Compiler stdc++)
+list(APPEND AWESOME_REQUIRED_INCLUDE_DIRS
+    "${LUAU_VM_INCLUDE_DIR}"
+    "${LUAU_COMPILER_INCLUDE_DIR}")
 # }}}
 
 # {{{ Optional libraries
