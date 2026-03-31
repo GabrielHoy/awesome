@@ -8,7 +8,8 @@
     "--header-insertion=iwyu",
     "--header-insertion-decorators",
     "--pch-storage=memory",
-    "--pretty"
+    "--pretty",
+    "--clang-tidy-checks=-clang-diagnostic-unused-include,-misc-unused-using-decls" //,-clang-analyzer-deadcode.DeadStores
   ],
 
   // Prevent duelling IntelliSense diagnostics (initially developed with Anysphere's C/C++ extension.)

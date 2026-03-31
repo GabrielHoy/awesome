@@ -19,7 +19,7 @@
  *
  */
 
-#include "config.h"
+#include "config.h" // IWYU pragma: keep
 #include "common/backtrace.h"
 
 #ifdef HAS_EXECINFO

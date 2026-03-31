@@ -19,7 +19,7 @@
  *
  */
 
-#include "config.h"
+#include "config.h" // IWYU pragma: keep
 #include "draw.h"
 #include "globalconf.h"
 

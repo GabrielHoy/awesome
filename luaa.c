@@ -47,7 +47,7 @@
 #include "awesome.h"
 #include "common/backtrace.h"
 #include "common/version.h"
-#include "config.h"
+#include "config.h" // IWYU pragma: keep
 #include "event.h"
 #include "objects/client.h"
 #include "objects/drawable.h"

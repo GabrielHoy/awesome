@@ -32,7 +32,7 @@
  * @module dbus
  */
 
-#include "config.h"
+#include "config.h" // IWYU pragma: keep
 #include "dbus.h"
 
 #include <glib.h>

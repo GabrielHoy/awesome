@@ -33,7 +33,7 @@
 #include <xcb/xcb_xrm.h>
 #include <X11/Xresource.h>
 
-#include "config.h"
+#include "config.h" // IWYU pragma: keep
 #ifdef WITH_XCB_ERRORS
 #include <xcb/xcb_errors.h>
 #endif

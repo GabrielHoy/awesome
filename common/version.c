@@ -19,7 +19,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#include "config.h"
+#include "config.h" // IWYU pragma: keep
 #include "common/version.h"
 #include "globalconf.h"
 #include "awesome-version-internal.h"

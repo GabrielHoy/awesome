@@ -7,9 +7,11 @@
 #define AWESOME_ICON_PATH     "@AWESOME_ICON_PATH@"
 #define AWESOME_DEFAULT_CONF  "@AWESOME_SYSCONFDIR@/rc.lua"
 
+#ifdef __CMAKE_GENERATING__
 #cmakedefine WITH_DBUS
 #cmakedefine WITH_XCB_ERRORS
 #cmakedefine HAS_EXECINFO
+#endif // __CMAKE_GENERATING__
 
 #endif //_CONFIG_H_
 
