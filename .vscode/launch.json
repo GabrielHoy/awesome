@@ -6,8 +6,16 @@
       "type": "lldb",
       "request": "launch",
       "program": "${workspaceFolder}/build/awesome",
-      "args": ["--replace"],
-      "env": { "DISPLAY": ":1", "WAYLAND_DISPLAY": "" },
+      "args": [
+        "--replace",
+        "--search", "${workspaceFolder}/build/lib"
+      ],
+      "env": {
+        "DISPLAY": ":1",
+        "WAYLAND_DISPLAY": "",
+        "AWESOME_THEMES_PATH": "${workspaceFolder}/build/themes",
+        "AWESOME_ICON_PATH": "${workspaceFolder}/icons"
+      },
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "ninja: build (Debug)"
     },
@@ -16,10 +24,15 @@
       "type": "lldb",
       "request": "launch",
       "program": "${workspaceFolder}/build-asan/awesome",
-      "args": ["--replace"],
+      "args": [
+        "--replace",
+        "--search", "${workspaceFolder}/build-asan/lib"
+      ],
       "env": {
         "DISPLAY": ":1",
         "WAYLAND_DISPLAY": "",
+        "AWESOME_THEMES_PATH": "${workspaceFolder}/build-asan/themes",
+        "AWESOME_ICON_PATH": "${workspaceFolder}/icons",
         "ASAN_OPTIONS": "halt_on_error=0:print_stacktrace=1:log_path=/tmp/asan_awesome",
         "UBSAN_OPTIONS": "print_stacktrace=1:log_path=/tmp/ubsan_awesome"
       },

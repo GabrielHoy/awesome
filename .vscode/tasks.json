@@ -25,6 +25,7 @@
         "-B", "${workspaceFolder}/build-asan",
         "-G", "Ninja",
         "-DCMAKE_BUILD_TYPE=Debug",
+        "-DGENERATE_DOC=OFF",
         "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
         "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer",
