@@ -80,7 +80,7 @@ static inline std::string Join(const std::vector<std::string>& segments, const c
 
 #define PlaygroundFunc(fName, body)                       \
     int fName() {                                         \
-        printf("%s", StyledPlaygroundStr(Join(SplitCapitals(__func__), " ")).c_str()); \
+        printf("%s\n", StyledPlaygroundStr(Join(SplitCapitals(__func__), " ")).c_str()); \
         body;                                             \
         printf("%s", StyledPlaygroundStr(Join(SplitCapitals(__func__), " ")).c_str()); \
         return 0;                                         \

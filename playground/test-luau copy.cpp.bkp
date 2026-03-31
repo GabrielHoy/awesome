@@ -16,9 +16,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
-#include <iostream>
 #include "util.hpp"
-#include "pretty-print.hpp"
+#include <iostream>
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPER: compile Luau source → bytecode → luau_load → lua_pcall
@@ -871,7 +870,10 @@ PlaygroundFunc(CoroutineBasics, {
     else
         printf("  coroutine error: %s\n", lua_tostring(co, -1));
 
-    printf("  costatus: %d (LUA_COFIN=%d)\n", lua_costatus(L, co), LUA_COFIN);
+    // NOTE: In Luau, lua_costatus returns LUA_COSUS (1) for a normally-finished
+    // coroutine, NOT LUA_COFIN (3).  Use lua_status(co)==LUA_OK to detect completion.
+    printf("  costatus: %d  (LUA_COSUS=%d, LUA_COFIN=%d)\n",
+           lua_costatus(L, co), LUA_COSUS, LUA_COFIN);
     lua_unref(L, co_ref);
 
     // ── Per-thread C data (Luau-specific) ─────────────────────────────────────
@@ -1294,18 +1296,6 @@ PlaygroundFunc(RegistryStorageAndRetrieval, {
     lua_close(L);
 })
 
-PlaygroundFunc(TestsInsideLuau, {
-    lua_State *L = luaL_newstate();
-    luaL_openlibs(L);
-
-    std::string src = std::string(PRETTY_PRINT_LUAU_SOURCE) + R"(
-        print("Hello, World!");
-    )";
-    runLuau(L,  src.c_str());
-
-    lua_close(L);
-})
-
 int main() {
     std::cout << BRACKET_STR << std::endl;
 
@@ -1330,7 +1320,6 @@ int main() {
     CheckPlaygroundFunc(CallbackHooks);
     CheckPlaygroundFunc(RegisterCLibrary);
     CheckPlaygroundFunc(RegistryStorageAndRetrieval);
-    CheckPlaygroundFunc(TestsInsideLuau);
 
     std::cout << BRACKET_STR << std::endl;
     return 0;
