@@ -235,10 +235,6 @@ set(AWESOME_REQUIRED_INCLUDE_DIRS
 # archives containing C++ object code.)
 list(APPEND AWESOME_REQUIRED_LDFLAGS Luau.VM Luau.Compiler stdc++)
 
-#list(APPEND AWESOME_REQUIRED_INCLUDE_DIRS
-#    "${LUAU_VM_INCLUDE_DIR}"
-#    "${LUAU_COMPILER_INCLUDE_DIR}")
-
 # }}}
 # }}}
 
