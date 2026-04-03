@@ -28,8 +28,9 @@
 #include <stdio.h>
 
 #include <lualib.h>
-#include <lauxlib.h>
 #include <xcb/randr.h> /* for XCB_RANDR_GET_MONITORS */
+
+#include "../luau.h"
 
 /** \brief Print version message and quit program.
  * \param executable program name
@@ -48,7 +49,7 @@ eprint_version(void)
         lua_pop(L, 1);
 
     /* Either push version number or error message onto stack */
-    (void) luaL_dostring(L, "return require('lgi.version')");
+    (void) luaA_dostring(L, "return require('lgi.version')");
 
 #ifdef WITH_DBUS
     const char *has_dbus = "yes";
@@ -78,7 +79,7 @@ eprint_version(void)
            " • Custom search paths: %s\n",
         /* version      */ AWESOME_VERSION,
         /* release      */ AWESOME_RELEASE,
-        /* Lua linked   */ LUA_RELEASE,
+        /* Lua linked   */ "Luau", /* Luau does away with LUA_RELEASE - it's the equivalent to just 'Luau' here, essentially. */
         /* Lua runtime  */ lua_tostring(L, -2),
         /* API Level    */ globalconf.api_level,
         /* DBus         */ has_dbus,

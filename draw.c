@@ -30,7 +30,7 @@
 
 #include <gdk-pixbuf/gdk-pixbuf.h>
 #include <cairo-xcb.h>
-#include <lauxlib.h>
+#include <lualib.h>
 
 static cairo_user_data_key_t data_key;
 

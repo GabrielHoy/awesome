@@ -63,22 +63,6 @@ endif()
 a_find_program(CONVERT_EXECUTABLE convert TRUE)
 # pkg-config
 include(FindPkgConfig)
-# lua
-include(FindLua)
-if (NOT LUA_FOUND)
-    message(FATAL_ERROR
-        "Could not find Lua. See the error above.\n"
-        "You might want to hint it using the LUA_DIR environment variable, "
-        "or set the LUA_INCLUDE_DIR / LUA_LIBRARY CMake variables.")
-endif()
-
-set(LUA_FULL_VERSION "${LUA_VERSION_MAJOR}.${LUA_VERSION_MINOR}.${LUA_VERSION_PATCH}")
-# 5.1 <= LUA_VERSION < 5.5
-if(NOT ((LUA_FULL_VERSION VERSION_EQUAL 5.1.0 OR LUA_FULL_VERSION VERSION_GREATER 5.1.0) AND LUA_FULL_VERSION VERSION_LESS 5.5.0))
-    message(FATAL_ERROR "Awesome only supports Lua versions 5.1-5.4, please refer to"
-                        "https://awesomewm.org/apidoc/documentation/10-building-and-testing.md.html#Building")
-endif()
-
 # Luau - embedded via git submodule @ third-party/luau
 set(LUAU_SUBDIR "${SOURCE_DIR}/third-party/luau")
 if(NOT EXISTS "${LUAU_SUBDIR}/CMakeLists.txt")
@@ -98,6 +82,17 @@ set(LUAU_EXTERN_C    ON  CACHE BOOL "Expose Luau C API via extern C" FORCE)
 set(LUAU_WERROR      OFF CACHE BOOL "Luau warnings as errors"        FORCE)
 
 add_subdirectory("${LUAU_SUBDIR}" "${CMAKE_BINARY_DIR}/luau" EXCLUDE_FROM_ALL)
+
+# Remove LUA_API/LUACODE_API overrides from Luau targets' INTERFACE_DEFINITIONS:
+# Prevents C "extern \"C\"" macro errors in awesome's C sources.
+foreach(_luau_target Luau.VM Luau.Compiler)
+    get_target_property(_iface_defs ${_luau_target} INTERFACE_COMPILE_DEFINITIONS)
+    if(_iface_defs)
+        list(FILTER _iface_defs EXCLUDE REGEX "^LUA_API=|^LUACODE_API=|^LUACODEGEN_API=")
+        set_property(TARGET ${_luau_target} PROPERTY INTERFACE_COMPILE_DEFINITIONS "${_iface_defs}")
+    endif()
+endforeach()
+
 # Luau.VM and Luau.Compiler carry their own include directories via
 # target_include_directories; we also expose the paths explicitly for
 # configure_file / lgi-check use.
@@ -227,20 +222,24 @@ endif()
 set(AWESOME_REQUIRED_LDFLAGS
     ${AWESOME_COMMON_REQUIRED_LDFLAGS}
     ${AWESOME_REQUIRED_LDFLAGS}
-    ${LUA_LIBRARIES}
     )
 
 set(AWESOME_REQUIRED_INCLUDE_DIRS
     ${AWESOME_COMMON_REQUIRED_INCLUDE_DIRS}
     ${AWESOME_REQUIRED_INCLUDE_DIRS}
-    ${LUA_INCLUDE_DIR})
+    "${LUAU_VM_INCLUDE_DIR}"
+    "${LUAU_COMPILER_INCLUDE_DIR}"
+)
 
 # (stdc++ is required here due to Luau's static
 # archives containing C++ object code.)
 list(APPEND AWESOME_REQUIRED_LDFLAGS Luau.VM Luau.Compiler stdc++)
-list(APPEND AWESOME_REQUIRED_INCLUDE_DIRS
-    "${LUAU_VM_INCLUDE_DIR}"
-    "${LUAU_COMPILER_INCLUDE_DIR}")
+
+#list(APPEND AWESOME_REQUIRED_INCLUDE_DIRS
+#    "${LUAU_VM_INCLUDE_DIR}"
+#    "${LUAU_COMPILER_INCLUDE_DIR}")
+
+# }}}
 # }}}
 
 # {{{ Optional libraries

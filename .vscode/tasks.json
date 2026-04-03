@@ -10,6 +10,8 @@
         "-B", "${workspaceFolder}/build",
         "-G", "Ninja",
         "-DCMAKE_BUILD_TYPE=Debug",
+        "-DLUAU_EXTERN_C=ON",
+        "-DLUAU_BUILD_SHARED=OFF",
         "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
       ],
@@ -26,6 +28,8 @@
         "-G", "Ninja",
         "-DCMAKE_BUILD_TYPE=Debug",
         "-DGENERATE_DOC=OFF",
+        "-DLUAU_EXTERN_C=ON",
+        "-DLUAU_BUILD_SHARED=OFF",
         "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
         "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer",

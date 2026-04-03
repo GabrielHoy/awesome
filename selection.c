@@ -164,7 +164,7 @@ selection_setup(lua_State *L)
     lua_setfield(L, -2, "__index");
 
     /* Set some more fields */
-    lua_pushcfunction(L, luaA_selection_get);
+    luaA_pushcfunction(L, luaA_selection_get);
     lua_setfield(L, -2, "__call");
 
     move_global_to_table(L, -2, "selection_acquire", "acquire");

@@ -23,7 +23,8 @@
 #define AWESOME_LUA_H
 
 #include <lua.h>
-#include <lauxlib.h>
+#include <lualib.h>
+#include <luacode.h>
 
 #include <basedir.h>
 
@@ -84,7 +85,9 @@ luaA_typerror(lua_State *L, int narg, const char *tname)
     luaL_traceback(L, L, NULL, 2);
     lua_concat(L, 2);
 #endif
-    return luaL_argerror(L, narg, msg);
+
+    luaL_argerror(L, narg, msg);
+    return 0; //This is just to make the compiler happy; luaL_argerror never returns.
 }
 
 static inline int
@@ -96,61 +99,32 @@ luaA_rangerror(lua_State *L, int narg, double min, double max)
     luaL_traceback(L, L, NULL, 2);
     lua_concat(L, 2);
 #endif
-    return luaL_argerror(L, narg, msg);
-}
 
-static inline void
-luaA_getuservalue(lua_State *L, int idx)
-{
-#if LUA_VERSION_NUM >= 502
-    lua_getuservalue(L, idx);
-#else
-    lua_getfenv(L, idx);
-#endif
-}
-
-static inline void
-luaA_setuservalue(lua_State *L, int idx)
-{
-#if LUA_VERSION_NUM >= 502
-    lua_setuservalue(L, idx);
-#else
-    lua_setfenv(L, idx);
-#endif
+    luaL_argerror(L, narg, msg);
+    return 0; //This is just to make the compiler happy; luaL_argerror never returns.
 }
 
 static inline size_t
 luaA_rawlen(lua_State *L, int idx)
 {
-#if LUA_VERSION_NUM >= 502
-    return lua_rawlen(L, idx);
-#else
+// #if LUA_VERSION_NUM >= 502
+//     return lua_rawlen(L, idx);
+// #else
     return lua_objlen(L, idx);
-#endif
+// #endif
 }
 
 static inline void
 luaA_registerlib(lua_State *L, const char *libname, const luaL_Reg *l)
 {
     assert(libname);
-#if LUA_VERSION_NUM >= 502
-    lua_newtable(L);
-    luaL_setfuncs(L, l, 0);
-    lua_pushvalue(L, -1);
-    lua_setglobal(L, libname);
-#else
     luaL_register(L, libname, l);
-#endif
 }
 
 static inline void
 luaA_setfuncs(lua_State *L, const luaL_Reg *l)
 {
-#if LUA_VERSION_NUM >= 502
-    luaL_setfuncs(L, l, 0);
-#else
     luaL_register(L, NULL, l);
-#endif
 }
 
 static inline bool
@@ -282,9 +256,12 @@ static inline int
 luaA_register(lua_State *L, int idx, int *ref)
 {
     lua_pushvalue(L, idx);
-    if(*ref != LUA_REFNIL)
-        luaL_unref(L, LUA_REGISTRYINDEX, *ref);
-    *ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    if(*ref != LUA_REFNIL) {
+        lua_unref(L, *ref); /* luaL_unref(L, LUA_REGISTRYINDEX, *ref); */
+    }
+    *ref = lua_ref(L, -1); /* *ref = lua_ref(L, LUA_REGISTRYINDEX); */
+    lua_pop(L, 1);
+
     return 0;
 }
 
@@ -295,7 +272,7 @@ luaA_register(lua_State *L, int idx, int *ref)
 static inline void
 luaA_unregister(lua_State *L, int *ref)
 {
-    luaL_unref(L, LUA_REGISTRYINDEX, *ref);
+    lua_unref(L, *ref); /* luaL_unref(L, LUA_REGISTRYINDEX, *ref); */
     *ref = LUA_REFNIL;
 }
 

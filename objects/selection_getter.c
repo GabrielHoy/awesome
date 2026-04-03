@@ -29,8 +29,6 @@
 typedef struct selection_getter_t
 {
     LUA_OBJECT_HEADER
-    /** Reference in the special table to this object */
-    int ref;
     /** Window used for the transfer */
     xcb_window_t window;
 } selection_getter_t;
@@ -69,12 +67,11 @@ luaA_selection_getter_new(lua_State *L)
     xcb_create_window(globalconf.connection, globalconf.screen->root_depth,
             selection->window, globalconf.screen->root, -1, -1, 1, 1, 0,
             XCB_COPY_FROM_PARENT, globalconf.screen->root_visual, 0, NULL);
-
     /* Save it in the registry */
     lua_pushliteral(L, REGISTRY_GETTER_TABLE_INDEX);
     lua_rawget(L, LUA_REGISTRYINDEX);
     lua_pushvalue(L, -2);
-    selection->ref = luaL_ref(L, -2);
+    lua_rawseti(L, -2, selection->window); //table[window_xid]=userdata
     lua_pop(L, 1);
 
     /* Get the atoms identifying the request */
@@ -103,10 +100,9 @@ selection_transfer_finished(lua_State *L, int ud)
     /* Unreference the selection object; it's dead */
     lua_pushliteral(L, REGISTRY_GETTER_TABLE_INDEX);
     lua_rawget(L, LUA_REGISTRYINDEX);
-    luaL_unref(L, -1, selection->ref);
+    lua_pushnil(L);
+    lua_rawseti(L, -2, selection->window);  // table[window_xid] = nil
     lua_pop(L, 1);
-
-    selection->ref = LUA_NOREF;
 
     luaA_object_emit_signal(L, ud, "data_end", 0);
 }
@@ -182,24 +178,13 @@ selection_getter_find_by_window(lua_State *L, xcb_window_t window)
     /* Iterate over all active selection getters */
     lua_pushliteral(L, REGISTRY_GETTER_TABLE_INDEX);
     lua_rawget(L, LUA_REGISTRYINDEX);
-    lua_pushnil(L);
-    while (lua_next(L, -2) != 0) {
-        if (lua_type(L, -1) == LUA_TUSERDATA) {
-            selection_getter_t *selection = lua_touserdata(L, -1);
-            if (selection->window == window) {
-                /* Found the right selection, remove table and key */
-                lua_remove(L, -2);
-                lua_remove(L, -2);
-                return 1;
-            }
-        }
-        /* Remove the value, leaving only the key */
-        lua_pop(L, 1);
+    lua_rawgeti(L, -1, window); //table[window_xid]
+    if (lua_isnil(L, -1)) {
+        lua_pop(L, 2);
+        return 0;
     }
-    /* Remove the getter table */
-    lua_pop(L, 1);
-
-    return 0;
+    lua_remove(L, -2); //remove sub-table - leaving userdata on top of stack
+    return 1;
 }
 
 void

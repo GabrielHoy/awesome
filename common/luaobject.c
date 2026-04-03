@@ -177,7 +177,7 @@ void
 luaA_object_connect_signal(lua_State *L, int oud,
                            const char *name, lua_CFunction fn)
 {
-    lua_pushcfunction(L, fn);
+    luaA_pushcfunction(L, fn);
     luaA_object_connect_signal_from_stack(L, oud, name, -1);
 }
 
@@ -190,7 +190,7 @@ void
 luaA_object_disconnect_signal(lua_State *L, int oud,
                               const char *name, lua_CFunction fn)
 {
-    lua_pushcfunction(L, fn);
+    luaA_pushcfunction(L, fn);
     luaA_object_disconnect_signal_from_stack(L, oud, name, -1);
 }
 

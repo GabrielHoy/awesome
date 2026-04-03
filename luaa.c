@@ -66,7 +66,6 @@
 #include "xrdb.h"
 
 #include <lua.h>
-#include <lauxlib.h>
 #include <lualib.h>
 
 /* for strings and Unicode handling */
@@ -398,11 +397,11 @@ luaA_fixups(lua_State *L)
 {
     /* export string.wlen */
     lua_getglobal(L, "string");
-    lua_pushcfunction(L, luaA_mbstrlen);
+    luaA_pushcfunction(L, luaA_mbstrlen);
     lua_setfield(L, -2, "wlen");
     lua_pop(L, 1);
     /* replace type */
-    lua_pushcfunction(L, luaAe_type);
+    luaA_pushcfunction(L, luaAe_type);
     lua_setglobal(L, "type");
 }
 
@@ -857,17 +856,18 @@ luaA_awesome_emit_signal(lua_State *L)
     return 0;
 }
 
-static int
-luaA_panic(lua_State *L)
+static void
+luaA_panic(lua_State *L, int errcode)
 {
-    warn("unprotected error in call to Lua API (%s)",
-         lua_tostring(L, -1));
+    warn("unprotected error in call to Lua API (%s) (code %d)",
+         lua_tostring(L, -1), errcode);
     buffer_t buf;
     backtrace_get(&buf);
     warn("dumping backtrace\n%s", buf.s);
     warn("restarting awesome");
     awesome_restart();
-    return 0;
+
+    return;
 }
 
 #if LUA_VERSION_NUM >= 502
@@ -924,7 +924,7 @@ luaA_dofunction_on_error(lua_State *L)
     /* emit error signal */
     signal_object_emit(L, &global_signals, "debug::error", 1);
 
-    if(!luaL_dostring(L, "return debug.traceback(\"error while running function!\", 3)"))
+    if(!luaA_dostring(L, "return debug.traceback(\"error while running function!\", 3)"))
     {
         /* Move traceback before error */
         lua_insert(L, -2);
@@ -1119,7 +1119,9 @@ luaA_init(xdgHandle* xdg, string_array_t *searchpath)
     L = globalconf.L.real_L_dont_use_directly = luaL_newstate();
 
     /* Set panic function */
-    lua_atpanic(L, luaA_panic);
+    lua_Callbacks* cb = lua_callbacks(L);
+    cb->panic = luaA_panic;
+    // lua_atpanic(L, luaA_panic);
 
     /* Set error handling function */
     lualib_dofunction_on_error = luaA_dofunction_on_error;
@@ -1223,7 +1225,7 @@ static bool
 luaA_loadrc(const char *confpath)
 {
     lua_State *L = globalconf_get_lua_State();
-    if(luaL_loadfile(L, confpath))
+    if(luaA_loadfile(L, confpath))
     {
         const char *err = lua_tostring(L, -1);
         luaA_startup_error(err);
@@ -1236,7 +1238,7 @@ luaA_loadrc(const char *confpath)
      * configuration file. */
     conffile = a_strdup(confpath);
     /* Move error handling function before function */
-    lua_pushcfunction(L, luaA_dofunction_on_error);
+    luaA_pushcfunction(L, luaA_dofunction_on_error);
     lua_insert(L, -2);
     if(!lua_pcall(L, 0, 0, -2))
     {

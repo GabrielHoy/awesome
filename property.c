@@ -571,8 +571,10 @@ luaA_register_xproperty(lua_State *L)
     if(found)
     {
         /* Property already registered */
-        if(found->type != property.type)
-            return luaL_error(L, "xproperty '%s' already registered with different type", name);
+        if(found->type != property.type) {
+            luaL_error(L, "xproperty '%s' already registered with different type", name);
+            return 0; /* only here to make the compiler happy; luaL_error never returns. */
+        }
     }
     else
     {

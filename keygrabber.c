@@ -119,8 +119,9 @@ keygrabber_handlekpress(lua_State *L, xcb_key_press_event_t *e)
 static int
 luaA_keygrabber_run(lua_State *L)
 {
-    if(globalconf.keygrabber != LUA_REFNIL)
+    if(globalconf.keygrabber != LUA_REFNIL) {
         luaL_error(L, "keygrabber already running");
+    }
 
     luaA_registerfct(L, 1, &globalconf.keygrabber);
 

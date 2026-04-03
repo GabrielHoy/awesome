@@ -168,7 +168,8 @@ luaA_class_add_properties(lua_class_t* lua_class,
 static int
 luaA_class_newindex_invalid(lua_State *L)
 {
-    return luaL_error(L, "attempt to index an object that was already garbage collected");
+    luaL_error(L, "attempt to index an object that was already garbage collected");
+    return 0; /* only here to make the compiler happy; luaL_error never returns. */
 }
 
 /** Index meta function for objects after they were GC'd.
@@ -200,17 +201,29 @@ luaA_class_gc(lua_State *L)
     lua_class_t *class = luaA_class_get(L, 1);
     class->instances--;
     /* Call the collector function of the class, and all its parent classes */
-    for(; class; class = class->parent)
-        if(class->collector)
+    for(; class; class = class->parent) {
+        if(class->collector) {
             class->collector(item);
+        }
+    }
+
+    /*
+     * Remove the registry entry installed by luaA_setuservalue. Without this
+     * the environment table (keyed by the userdata pointer as a lightuserdata)
+     * would be permanently anchored in the registry after the object is freed.
+    */
+    lua_pushlightuserdata(L, item);
+    lua_pushnil(L);
+    lua_rawset(L, LUA_REGISTRYINDEX);
+
     /* Unset its metatable so that e.g. luaA_toudata() will no longer accept
      * this object. This is needed since other __gc methods can still use this.
      * We also make sure that `item.valid == false`.
      */
     lua_newtable(L);
-    lua_pushcfunction(L, luaA_class_index_invalid);
+    luaA_pushcfunction(L, luaA_class_index_invalid);
     lua_setfield(L, -2, "__index");
-    lua_pushcfunction(L, luaA_class_newindex_invalid);
+    luaA_pushcfunction(L, luaA_class_newindex_invalid);
     lua_setfield(L, -2, "__newindex");
     lua_setmetatable(L, 1);
     return 0;
@@ -260,7 +273,7 @@ luaA_class_setup(lua_State *L, lua_class_t *class,
     /* Duplicate objects metatable */
     lua_pushvalue(L, -1);
     /* Set garbage collector in the metatable */
-    lua_pushcfunction(L, luaA_class_gc);
+    luaA_pushcfunction(L, luaA_class_gc);
     lua_setfield(L, -2, "__gc");
 
     lua_setfield(L, -2, "__index"); /* metatable.__index = metatable      1 */
@@ -289,7 +302,7 @@ luaA_class_setup(lua_State *L, lua_class_t *class,
 void
 luaA_class_connect_signal(lua_State *L, lua_class_t *lua_class, const char *name, lua_CFunction fn)
 {
-    lua_pushcfunction(L, fn);
+    luaA_pushcfunction(L, fn);
     luaA_class_connect_signal_from_stack(L, lua_class, name, -1);
 }
 

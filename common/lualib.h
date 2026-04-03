@@ -23,7 +23,8 @@
 #define AWESOME_COMMON_LUALIB
 
 #include <lua.h>
-#include <lauxlib.h>
+#include <lualib.h>
+#include "../luau.h"
 
 #include "common/util.h"
 
@@ -69,7 +70,7 @@ luaA_dofunction(lua_State *L, int nargs, int nret)
     /* Move function before arguments */
     lua_insert(L, - nargs - 1);
     /* Push error handling function */
-    lua_pushcfunction(L, luaA_dofunction_error);
+    luaA_pushcfunction(L, luaA_dofunction_error);
     /* Move error handling function before args and function */
     lua_insert(L, - nargs - 2);
     int error_func_pos = lua_gettop(L) - nargs - 1;
@@ -99,7 +100,7 @@ int luaA_call_handler(lua_State *L, int handler)
     int nargs = lua_gettop(L);
 
     /* Push error handling function and move it before args */
-    lua_pushcfunction(L, luaA_dofunction_error);
+    luaA_pushcfunction(L, luaA_dofunction_error);
     lua_insert(L, - nargs - 1);
     int error_func_pos = 1;
 
