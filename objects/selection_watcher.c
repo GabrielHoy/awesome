@@ -22,7 +22,7 @@
 #include "objects/selection_watcher.h"
 #include "common/luaobject.h"
 #include "globalconf.h"
-#include "../luau.h"
+#include "../compat/luau_compat.h"
 
 #include <xcb/xfixes.h>
 

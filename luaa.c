@@ -67,6 +67,9 @@
 
 #include <lua.h>
 #include <lualib.h>
+#include "compat/io.h"
+#include "compat/package.h"
+#include "compat/require.h"
 
 /* for strings and Unicode handling */
 #include <glib.h>
@@ -389,12 +392,123 @@ luaAe_type(lua_State *L)
     return 1;
 }
 
-/** Replace various standards Lua functions with our own.
+/**
+ * Implementation for os.getenv
+ * 
+ * \return 1 (string value or nil)
+ */
+static int
+luaA_os_getenv(lua_State *L)
+{
+    const char *name = luaL_checkstring(L, 1);
+    const char *val  = getenv(name);
+    if (val)
+        lua_pushstring(L, val);
+    else
+        lua_pushnil(L);
+    return 1;
+}
+
+/**
+ * Implementation for awesome.eval
+ * 
+ * Compile and run a Luau source string, returning all results.
+ * Mirrors the role of Lua 5.x's `load` for dynamic code evaluation.
+ * 
+ * Upon error returns (nil, errmsg) rather than raising.
+ * 
+ * \return number of values returned by the evaluated chunk, or 2 (nil, errmsg)
+ */
+static int
+luaA_eval(lua_State *L)
+{
+    size_t srclen;
+    const char *src       = luaL_checklstring(L, 1, &srclen);
+    const char *chunkname = luaL_optstring(L, 2, "=(eval)");
+    int base = lua_gettop(L); /* save arg count so we can compute result count */
+
+    size_t bcLen = 0;
+    char  *bc    = luau_compile(src, srclen, NULL, &bcLen);
+    int status   = luau_load(L, chunkname, bc, bcLen, 0);
+    free(bc);
+
+    if (status != LUA_OK)
+    {
+        /* stack: [...args, errmsg] → return nil, errmsg */
+        lua_pushnil(L);
+        lua_insert(L, -2);
+        return 2;
+    }
+
+    status = lua_pcall(L, 0, LUA_MULTRET, 0);
+    if (status != LUA_OK)
+    {
+        /* stack: [...args, errmsg] → return nil, errmsg */
+        lua_pushnil(L);
+        lua_insert(L, -2);
+        return 2;
+    }
+
+    return lua_gettop(L) - base;
+}
+
+/*
+ * loadstring(chunk [, chunkname]) / load(chunk [, chunkname])
+ *
+ * Luau deliberately omits load()/loadstring() as Lua globals for sandboxing
+ * reasons, but exposes luau_compile() + luau_load() at the C level.  We
+ * re-expose them so that AwesomeWM's Lua library (which uses the Lua 5.1
+ * pattern `local load = loadstring or load`) continues to work without
+ * modification.
+ *
+ * Only the string-chunk form is implemented (functions-as-chunks are not used
+ * anywhere in lib/).  Returns: function on success, nil+errmsg on failure.
+ */
+static int
+luaA_loadstring(lua_State *L)
+{
+    size_t      len;
+    const char *chunk     = luaL_checklstring(L, 1, &len);
+    const char *chunkname = luaL_optstring(L, 2, "=(load)");
+
+    size_t bcLen  = 0;
+    char  *bc     = luau_compile(chunk, len, NULL, &bcLen);
+    int    status = luau_load(L, chunkname, bc, bcLen, 0);
+    free(bc);
+
+    if (status == LUA_OK)
+        return 1;   /* compiled function is on the stack */
+
+    /* luau_load pushed the error string; return nil, errmsg */
+    lua_pushnil(L);
+    lua_insert(L, -2);  /* [nil, errmsg] */
+    return 2;
+}
+
+/**
+ * Replace various standards Lua functions with our own.
  * \param L The Lua VM state.
  */
 static void
 luaA_fixups(lua_State *L)
 {
+    /* Set up the package global and our require() shim first so that every
+     * subsequent call to require() in AwesomeWM's Lua library works correctly.
+     * package.path / package.cpath are still empty here; add_to_search_path()
+     * at the end of luaA_init() fills them in. */
+    luaA_io_open(L);
+    luaA_package_open(L);
+    luaA_require_open(L);
+
+    /* Expose loadstring / load — Luau omits these as Lua globals but the
+     * C-level luaL_loadbuffer() is still available.  Providing them here lets
+     * lib/ code use the standard `local load = loadstring or load` idiom
+     * without modification. */
+    luaA_pushcfunction(L, luaA_loadstring);
+    lua_pushvalue(L, -1);
+    lua_setglobal(L, "loadstring");
+    lua_setglobal(L, "load");
+
     /* export string.wlen */
     lua_getglobal(L, "string");
     luaA_pushcfunction(L, luaA_mbstrlen);
@@ -403,6 +517,11 @@ luaA_fixups(lua_State *L)
     /* replace type */
     luaA_pushcfunction(L, luaAe_type);
     lua_setglobal(L, "type");
+    /* supplement Lua 5.x's os library to Luau state - os.getenv */
+    lua_getglobal(L, "os");
+    luaA_pushcfunction(L, luaA_os_getenv);
+    lua_setfield(L, -2, "getenv");
+    lua_pop(L, 1);
 }
 
 static const char *
@@ -870,48 +989,11 @@ luaA_panic(lua_State *L, int errcode)
     return;
 }
 
-#if LUA_VERSION_NUM >= 502
 static const char *
 luaA_tolstring(lua_State *L, int idx, size_t *len)
 {
     return luaL_tolstring(L, idx, len);
 }
-#else
-static const char *
-luaA_tolstring(lua_State *L, int idx, size_t *len)
-{
-    /* Try using the metatable. If that fails, push the value itself onto
-     * the stack.
-     */
-    if (!luaL_callmeta(L, idx, "__tostring"))
-        lua_pushvalue(L, idx);
-
-    switch (lua_type(L, -1)) {
-    case LUA_TSTRING:
-        lua_pushvalue(L, -1);
-        break;
-    case LUA_TBOOLEAN:
-        if (lua_toboolean(L, -1))
-            lua_pushliteral(L, "true");
-        else
-            lua_pushliteral(L, "false");
-        break;
-    case LUA_TNUMBER:
-        lua_pushfstring(L, "%f", lua_tonumber(L, -1));
-        break;
-    case LUA_TNIL:
-        lua_pushliteral(L, "nil");
-        break;
-    default:
-        lua_pushfstring(L, "%s: %p",
-                lua_typename(L, lua_type(L, -1)),
-                lua_topointer(L, -1));
-        break;
-    }
-    lua_remove(L, -2);
-    return lua_tolstring(L, -1, len);
-}
-#endif
 
 static int
 luaA_dofunction_on_error(lua_State *L)
@@ -924,16 +1006,15 @@ luaA_dofunction_on_error(lua_State *L)
     /* emit error signal */
     signal_object_emit(L, &global_signals, "debug::error", 1);
 
-    if(!luaA_dostring(L, "return debug.traceback(\"error while running function!\", 3)"))
-    {
-        /* Move traceback before error */
-        lua_insert(L, -2);
-        /* Insert sentence */
-        lua_pushliteral(L, "\nerror: ");
-        /* Move it before error */
-        lua_insert(L, -2);
-        lua_concat(L, 3);
-    }
+    luaL_traceback(L, L, "error while running function!", 1);
+    /* Move traceback before error */
+    lua_insert(L, -2);
+    /* Insert sentence */
+    lua_pushliteral(L, "\nerror: ");
+    /* Move it before error */
+    lua_insert(L, -2);
+    lua_concat(L, 3);
+
     return 1;
 }
 
@@ -1033,7 +1114,11 @@ setup_awesome_signals(lua_State *L)
     lua_pop(L, 1);
 }
 
-/* Add things to the string on top of the stack */
+
+/* Append search-path entries to the string on top of the stack.
+ * for_lua=true  → appends /?.lua and /?/init.lua patterns (for package.path)
+ * for_lua=false → appends /?.so patterns (for package.cpath)
+ */
 static void
 add_to_search_path(lua_State *L, string_array_t *searchpath, bool for_lua)
 {
@@ -1069,20 +1154,27 @@ add_to_search_path(lua_State *L, string_array_t *searchpath, bool for_lua)
         lua_concat(L, components + 1); /* concatenate with string on top of the stack */
     }
 
-    /* add Lua lib path (/usr/share/awesome/lib by default) */
+    /* add awesome Lua lib path (/usr/share/awesome/lib by default) and
+     * system Lua 5.1 share/cmod paths so that lgi and other system modules
+     * can be found via require(). */
     if (for_lua)
     {
         lua_pushliteral(L, ";" AWESOME_LUA_LIB_PATH "/?.lua");
         lua_pushliteral(L, ";" AWESOME_LUA_LIB_PATH "/?/init.lua");
-        lua_concat(L, 3); /* concatenate with thing on top of the stack when we were called */
+        lua_pushliteral(L, ";" LUA_SHARE_PATH "/?.lua");
+        lua_pushliteral(L, ";" LUA_SHARE_PATH "/?/init.lua");
+        lua_concat(L, 5);
     } else {
         lua_pushliteral(L, ";" AWESOME_LUA_LIB_PATH "/?.so");
-        lua_concat(L, 2); /* concatenate with thing on top of the stack when we were called */
+        lua_pushliteral(L, ";" LUA_CMOD_PATH "/?.so");
+        lua_concat(L, 3);
     }
 }
 
 /** Initialize the Lua VM
  * \param xdg An xdg handle to use to get XDG basedir.
+ * \param searchpath User-specified extra search paths (from -p CLI flags).
+ *                   Consumed here; caller must string_array_wipe after return.
  */
 void
 luaA_init(xdgHandle* xdg, string_array_t *searchpath)
@@ -1113,6 +1205,7 @@ luaA_init(xdgHandle* xdg, string_array_t *searchpath)
         { "kill", luaA_kill},
         { "sync", luaA_sync},
         { "_get_key_name", luaA_get_key_name},
+        { "eval", luaA_eval},
         { NULL, NULL }
     };
 
@@ -1121,7 +1214,6 @@ luaA_init(xdgHandle* xdg, string_array_t *searchpath)
     /* Set panic function */
     lua_Callbacks* cb = lua_callbacks(L);
     cb->panic = luaA_panic;
-    // lua_atpanic(L, luaA_panic);
 
     /* Set error handling function */
     lualib_dofunction_on_error = luaA_dofunction_on_error;
@@ -1195,22 +1287,38 @@ luaA_init(xdgHandle* xdg, string_array_t *searchpath)
     /* Setup the selection interface */
     selection_setup(L);
 
-    /* add Lua search paths */
+    /*
+     * Populate package.path / package.cpath with AwesomeWM lib dir and any
+     * user-supplied search paths. The package table itself is created by
+     * luau/package.h before this point; no-ops/warns gracefully if it's not present for
+     * one reason or another.
+    */
     lua_getglobal(L, "package");
-    if (LUA_TTABLE != lua_type(L, 1))
+    if (LUA_TTABLE == lua_type(L, -1))
     {
-        warn("package is not a table");
-        return;
+        lua_getfield(L, -1, "path");
+        add_to_search_path(L, searchpath, true);
+        lua_setfield(L, -2, "path");
+
+        lua_getfield(L, -1, "cpath");
+        /* 
+         * Prepend the build-time lgi directory so corelgiluau.so is found
+         * before the system corelgilua51.so
+        */
+        lua_pushliteral(L, BUILD_LGI_PATH "/?.so");
+        lua_pushvalue(L, -2);                  /* [..., new_entry, old_cpath] */
+        lua_remove(L, -3);                     /* remove old_cpath original  */
+        lua_pushliteral(L, ";");
+        lua_insert(L, -2);                     /* [..., new_entry, ";", old_cpath] */
+        lua_concat(L, 3);                        /* new_entry ; old_cpath      */
+        add_to_search_path(L, searchpath, false);
+        lua_setfield(L, -2, "cpath");
     }
-    lua_getfield(L, 1, "path");
-    add_to_search_path(L, searchpath, true);
-    lua_setfield(L, 1, "path"); /* package.path = "concatenated string" */
-
-    lua_getfield(L, 1, "cpath");
-    add_to_search_path(L, searchpath, false);
-    lua_setfield(L, 1, "cpath"); /* package.cpath = "concatenated string" */
-
-    lua_pop(L, 1); /* pop "package" */
+    else
+    {
+        warn("package global not found; search paths not set (has luau/package.h been initialised?)");
+    }
+    lua_pop(L, 1); /* pop package (or the nil) */
 }
 
 static void

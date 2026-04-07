@@ -24,7 +24,7 @@
 
 #include <lua.h>
 #include <lualib.h>
-#include "../luau.h"
+#include "../compat/luau_compat.h"
 
 #include "common/util.h"
 

@@ -627,7 +627,7 @@ main(int argc, char **argv)
 
         /* Try to parse it */
         lua_State *L = luaL_newstate();
-        if(luaL_loadfile(L, config))
+        if(luaA_loadfile(L, config))
         {
             const char *err = lua_tostring(L, -1);
             fprintf(stdout, "\nERROR: %s\n", err);

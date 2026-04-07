@@ -1,5 +1,5 @@
 /*
-    luau.h - Luau Compatibility Layer
+    compat.h - Luau Compatibility Layer
 
     This file provides compatibility and shim functions that
     attempt to provide functionality equivalent to the standard Lua 5.1

@@ -90,7 +90,10 @@ set(AWE_SRCS
     ${BUILD_DIR}/objects/selection_watcher.c
     ${BUILD_DIR}/objects/tag.c
     ${BUILD_DIR}/objects/selection_getter.c
-    ${BUILD_DIR}/objects/window.c)
+    ${BUILD_DIR}/objects/window.c
+    ${BUILD_DIR}/compat/package.c
+    ${BUILD_DIR}/compat/require.c
+    ${BUILD_DIR}/compat/io.c)
 
 set(AWE_MAN_SRCS
     ${SOURCE_DIR}/manpages/awesome.1.txt

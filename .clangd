@@ -1,0 +1,22 @@
+# Clangd LSP configurations
+#
+# CompilationDatabase points clangd at the Ninja-generated
+# compile_commands.json so that project .c files get exact
+# compiler flags (include paths, defines, -include shims, etc.).
+#
+# The Add flags below act as a fallback for files not covered by
+# compile_commands.json - headers opened directly in the editor,
+# for example `compat/lgi_luau_shim.h`
+
+CompileFlags:
+  CompilationDatabase: build
+  Add:
+    # GLib / GObject
+    - "-I/usr/include/glib-2.0"
+    - "-I/usr/lib/x86_64-linux-gnu/glib-2.0/include"
+    # GObject-Introspection
+    - "-I/usr/include/gobject-introspection-1.0"
+    # libffi (ffi.h) and other arch-specific system headers
+    - "-I/usr/include/x86_64-linux-gnu"
+    # Compat shim directory (compat/lauxlib.h, compat/lgi_luau_shim.h)
+    - "-I/home/tampered/repos/awesome/compat"

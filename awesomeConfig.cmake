@@ -233,7 +233,8 @@ set(AWESOME_REQUIRED_INCLUDE_DIRS
 
 # (stdc++ is required here due to Luau's static
 # archives containing C++ object code.)
-list(APPEND AWESOME_REQUIRED_LDFLAGS Luau.VM Luau.Compiler stdc++)
+# dl is required for dlopen/dlsym used by the package.cpath C extension searcher.
+list(APPEND AWESOME_REQUIRED_LDFLAGS Luau.VM Luau.Compiler stdc++ dl)
 
 # }}}
 # }}}
@@ -319,8 +320,105 @@ set(AWESOME_RELEASE          ${CODENAME})
 set(AWESOME_SYSCONFDIR       ${XDG_CONFIG_DIR}/${PROJECT_AWE_NAME})
 set(AWESOME_LUA_LIB_PATH     ${AWESOME_DATA_PATH}/lib)
 set(AWESOME_ICON_PATH        ${AWESOME_DATA_PATH}/icons)
+
+# Detect system Lua 5.1 paths for package.path and package.cpath.
+# These paths are needed so that require("lgi") and other system Lua C modules
+# can be found at runtime.  Try pkg-config first; fall back to standard FHS
+# locations including Debian/Ubuntu multiarch paths.
+execute_process(COMMAND pkg-config --variable=INSTALL_CMOD lua5.1
+    OUTPUT_VARIABLE LUA_CMOD_PATH OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+execute_process(COMMAND pkg-config --variable=INSTALL_LMOD lua5.1
+    OUTPUT_VARIABLE LUA_SHARE_PATH OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+if(NOT LUA_CMOD_PATH)
+    if(CMAKE_LIBRARY_ARCHITECTURE)
+        set(LUA_CMOD_PATH "/usr/lib/${CMAKE_LIBRARY_ARCHITECTURE}/lua/5.1")
+    else()
+        set(LUA_CMOD_PATH "/usr/lib/lua/5.1")
+    endif()
+endif()
+if(NOT LUA_SHARE_PATH)
+    set(LUA_SHARE_PATH "/usr/share/lua/5.1")
+endif()
+message(STATUS "System Lua C module path: ${LUA_CMOD_PATH}")
+message(STATUS "System Lua share path:    ${LUA_SHARE_PATH}")
 set(AWESOME_THEMES_PATH      ${AWESOME_DATA_PATH}/themes)
 set(AWESOME_API_LEVEL        4)
+
+# {{{ Build lgi's C core against Luau headers (corelgiluau.so)
+#
+# lgi (https://github.com/lgi-devs/lgi) is included as a git submodule at
+# third-party/lgi.  We compile its C source files against Luau's lua.h
+# rather than the system Lua 5.1 headers, using compat/lgi_luau_shim.h
+# (force-included) to bridge the two API differences:
+#   - lua_pushcfunction: Luau 3-arg macro → 2-arg shim
+#   - lua_setfenv/lua_getfenv on userdata → registry-keyed-via-pointer shim
+#
+# The output is ${CMAKE_BINARY_DIR}/lgi/corelgiluau.so, which is
+# found by require("lgi.corelgiluau") via our lib/lgi/core.lua override
+# which tries the Luau build first, falls back to the system lua51 build.
+
+pkg_check_modules(LGI_GI REQUIRED gobject-introspection-1.0)
+pkg_check_modules(LGI_FFI REQUIRED libffi)
+
+set(LGI_SOURCE_DIR ${SOURCE_DIR}/third-party/lgi/lgi)
+
+set(LGI_C_SOURCES
+    ${LGI_SOURCE_DIR}/buffer.c
+    ${LGI_SOURCE_DIR}/callable.c
+    ${LGI_SOURCE_DIR}/core.c
+    ${LGI_SOURCE_DIR}/gi.c
+    ${LGI_SOURCE_DIR}/marshal.c
+    ${LGI_SOURCE_DIR}/object.c
+    ${LGI_SOURCE_DIR}/record.c
+)
+
+add_library(corelgiluau SHARED ${LGI_C_SOURCES})
+
+set_target_properties(corelgiluau PROPERTIES
+    # Lua C modules must have no library prefix - "libcorelgilua51.so" -> "corelgilua51.so")
+    PREFIX ""
+    # Keep the same filename as the system module so the original lgi/core.lua
+    # (require('lgi.corelgilua51')) finds our Luau build
+    # first, because BUILD_LGI_PATH is prepended to package.cpath at startup.
+    OUTPUT_NAME "corelgilua51"
+    # Place the .so in build/lgi/ so it's findable on package.cpath during development
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lgi"
+)
+
+target_include_directories(corelgiluau PRIVATE
+    ${LGI_SOURCE_DIR}                                    # lgi.h
+    ${SOURCE_DIR}/third-party/luau/VM/include            # Luau's lua.h (takes precedence over system Lua)
+    ${SOURCE_DIR}/third-party/luau/Common/include        # Luau internal headers if needed
+    ${SOURCE_DIR}/compat                                 # lgi_luau_shim.h
+    ${LGI_GI_INCLUDE_DIRS}
+    ${LGI_FFI_INCLUDE_DIRS}
+)
+
+target_compile_options(corelgiluau PRIVATE
+    # Force-include the compat shim before any lgi source file is processed.
+    # This ensures lua_pushcfunction and lua_setfenv/getfenv are shimmed
+    # before lgi.h is included.
+    -include ${SOURCE_DIR}/compat/lgi_luau_shim.h
+    # lgi uses some deprecated GLib/GI API; suppress noise during build
+    -Wno-deprecated-declarations
+    # Suppress warnings from lgi source we don't control
+    -Wno-unused-parameter
+    -Wno-missing-prototypes
+    -Wno-strict-prototypes
+)
+
+target_link_libraries(corelgiluau PRIVATE
+    ${LGI_GI_LIBRARIES}
+    ${LGI_FFI_LIBRARIES}
+)
+
+# Install corelgiluau.so alongside the awesome Lua library for installed builds.
+# During development, use -p build/lgi or ensure LIBRARY_OUTPUT_DIRECTORY is on cpath.
+install(TARGETS corelgiluau
+    LIBRARY DESTINATION ${AWESOME_LUA_LIB_PATH}/lgi
+)
+
+message(STATUS "lgi Luau build: ${CMAKE_BINARY_DIR}/lgi/corelgilua51.so")
 # }}}
 
 if(GENERATE_DOC)
@@ -345,7 +443,9 @@ file(GLOB awesome_c_configure_files RELATIVE ${SOURCE_DIR}
     ${SOURCE_DIR}/common/*.c
     ${SOURCE_DIR}/common/*.h
     ${SOURCE_DIR}/objects/*.c
-    ${SOURCE_DIR}/objects/*.h)
+    ${SOURCE_DIR}/objects/*.h
+    ${SOURCE_DIR}/compat/*.h
+    ${SOURCE_DIR}/compat/*.c)
 
 file(GLOB_RECURSE awesome_lua_configure_files RELATIVE ${SOURCE_DIR}
     ${SOURCE_DIR}/lib/*.lua)

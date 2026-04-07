@@ -30,7 +30,7 @@
 #include <lualib.h>
 #include <xcb/randr.h> /* for XCB_RANDR_GET_MONITORS */
 
-#include "../luau.h"
+#include "../compat/luau_compat.h"
 
 /** \brief Print version message and quit program.
  * \param executable program name
