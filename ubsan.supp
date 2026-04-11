@@ -1,0 +1,46 @@
+# UBSan runtime suppressions for known-noisy pre-existing issues.
+# Use with: UBSAN_OPTIONS="...:suppressions=/home/tampered/repos/awesome/ubsan.supp"
+#
+# GCC 13 UBSan does not reliably apply wildcards at the start of patterns,
+# so explicit function names are listed alongside the wildcard forms.
+
+# ── array macro noise ───────────────────────────────────────────────────────
+# DO_BARRAY / DO_ARRAY generate *_array_lookup and *_array_splice families.
+# They call bsearch / memcpy with a NULL pointer + zero count when the array
+# is empty, which violates glibc's __nonnull annotations. Logically safe
+# (neither function dereferences with nmemb/size=0), but UBSan fires.
+nonnull-attribute:*_array_lookup
+nonnull-attribute:*_array_splice
+nonnull-attribute:*_array_take
+nonnull-attribute:*_array_remove
+# Explicit names for GCC wildcard fallback:
+nonnull-attribute:cptr_array_splice
+nonnull-attribute:cptr_array_take
+nonnull-attribute:cptr_array_remove
+nonnull-attribute:signal_array_lookup
+nonnull-attribute:signal_array_splice
+nonnull-attribute:signal_array_take
+nonnull-attribute:signal_array_remove
+nonnull-attribute:cursors_array_lookup
+nonnull-attribute:xproperty_array_lookup
+nonnull-attribute:screen_array_splice
+nonnull-attribute:screen_array_take
+nonnull-attribute:screen_array_remove
+nonnull-attribute:drawin_array_splice
+nonnull-attribute:drawin_array_take
+nonnull-attribute:drawin_array_remove
+nonnull-attribute:sequence_pair_array_splice
+nonnull-attribute:sequence_pair_array_take
+nonnull-attribute:sequence_pair_array_remove
+
+# ── awesome_atexit VLA ──────────────────────────────────────────────────────
+# xcb_window_t wins[globalconf.clients.len] evaluates to a zero-length VLA
+# at shutdown when no clients are managed. Never accessed when len==0.
+vla-bound:awesome_atexit
+
+# ── lgi/marshal.c alignment ────────────────────────────────────────────────
+# GIArgument union accessed via unaligned pointer arithmetic in third-party
+# lgi code. Pre-existing upstream issue. The lgi .so strips symbols so
+# function-name suppression can't match; this source-path form is matched
+# against the diagnostic's reported file location.
+alignment:lgi/marshal.c

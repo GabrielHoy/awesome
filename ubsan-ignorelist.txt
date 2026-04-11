@@ -1,0 +1,25 @@
+# Compile-time sanitizer ignorelist — GCC -fsanitize-ignorelist=this_file
+# Excludes known-noisy pre-existing UB from instrumentation so ASAN/UBSan
+# output stays useful for real issues.
+
+# ── array macro-generated functions ────────────────────────────────────────
+# DO_BARRAY / DO_ARRAY generate *_array_lookup / *_array_splice / *_array_take
+# / *_array_remove. All call bsearch or memcpy with NULL + zero count when
+# the array is empty, violating glibc's __nonnull annotations. Logically safe
+# but fires UBSan on every empty-array probe. List all observed names; GCC
+# 13 ignorelist wildcards work but explicit names are kept for clarity.
+fun:*_array_lookup
+fun:*_array_splice
+fun:*_array_take
+fun:*_array_remove
+fun:*_array_inserts
+
+# ── VLA at shutdown ─────────────────────────────────────────────────────────
+# xcb_window_t wins[globalconf.clients.len] in awesome_atexit evaluates to
+# a zero-length VLA when no clients are managed. Never accessed when len==0.
+fun:awesome_atexit
+
+# ── third-party lgi ────────────────────────────────────────────────────────
+# GIArgument union accessed via unaligned pointer arithmetic in lgi marshal
+# code. Pre-existing upstream alignment issue — not in scope for this port.
+src:third-party/lgi/*

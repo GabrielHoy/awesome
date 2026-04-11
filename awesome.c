@@ -123,7 +123,7 @@ awesome_atexit(bool restart)
     }
 
     /* Save the client order.  This is useful also for "hard" restarts. */
-    xcb_window_t wins[globalconf.clients.len];
+    xcb_window_t wins[globalconf.clients.len > 0 ? globalconf.clients.len : 1];
     int n = 0;
     foreach(client, globalconf.clients)
         wins[n++] = (*client)->window;

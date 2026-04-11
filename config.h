@@ -4,8 +4,13 @@
 #define AWESOME_LUA_LIB_PATH  "@AWESOME_LUA_LIB_PATH@"
 #define LUA_CMOD_PATH         "@LUA_CMOD_PATH@"
 #define LUA_SHARE_PATH        "@LUA_SHARE_PATH@"
-/* Directory containing corelgiluau.so — placed on package.cpath at startup */
-#define BUILD_LGI_PATH        "@CMAKE_BINARY_DIR@/lgi"
+/*
+ * Build directory — placed on package.cpath at startup so that
+ * require('lgi.corelgilua51') resolves to <build>/lgi/corelgilua51.so
+ */
+#define BUILD_LGI_PATH        "@CMAKE_BINARY_DIR@"
+/* lgi Lua source dir — prepended to package.path to shadow the system lgi */
+#define BUILD_LGI_LUA_PATH    "@CMAKE_SOURCE_DIR@/third-party/lgi"
 #define XDG_CONFIG_DIR        "@XDG_CONFIG_DIR@"
 #define AWESOME_THEMES_PATH   "@AWESOME_THEMES_PATH@"
 #define AWESOME_ICON_PATH     "@AWESOME_ICON_PATH@"

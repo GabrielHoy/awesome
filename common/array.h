@@ -91,7 +91,8 @@
                     (arr->len - pos - len) * sizeof(*items));               \
             arr->len += count - len;                                        \
         }                                                                   \
-        memcpy(arr->tab + pos, items, count * sizeof(*items));              \
+        if (count > 0)                                                      \
+            memcpy(arr->tab + pos, items, count * sizeof(*items));          \
     }                                                                       \
     static inline type_t pfx##_array_take(pfx##_array_t *arr, int pos) {    \
         type_t res = arr->tab[pos];                                         \
@@ -152,6 +153,8 @@
     static inline type_t *                                                  \
     pfx##_array_lookup(pfx##_array_t *arr, type_t *e)                       \
     {                                                                       \
+        if (arr->len == 0)                                                  \
+            return NULL;                                                    \
         return bsearch(e, arr->tab, arr->len, sizeof(type_t), cmp);         \
     }
 

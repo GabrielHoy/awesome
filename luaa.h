@@ -103,11 +103,7 @@ luaA_rangerror(lua_State *L, int narg, double min, double max)
 static inline size_t
 luaA_rawlen(lua_State *L, int idx)
 {
-// #if LUA_VERSION_NUM >= 502
-//     return lua_rawlen(L, idx);
-// #else
     return lua_objlen(L, idx);
-// #endif
 }
 
 static inline void

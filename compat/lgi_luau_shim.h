@@ -72,12 +72,52 @@
 #endif
 #define lua_pushcfunction(L, fn) lua_pushcclosurek(L, fn, NULL, 0, NULL)
 
+/* ─── Fix 1b: luaL_ref / luaL_unref / luaL_checkint ───────────────────────
+ *
+ * Luau has lua_ref/lua_unref (which do NOT pop) instead of Lua 5.1's
+ * luaL_ref/luaL_unref (which DO pop).  lgi calls the luaL_ variants.
+ * luaL_checkint was a convenience macro in Lua 5.1 headers, absent in Luau.
+ *
+ * These must be defined here - not just in luau_compat.h - because this header
+ * is force-included in the lgi .c files that get compiled into the .so.
+ * Utilizing static inlines ensures they get compiled into the .so's object code
+ * rather than remaining as unresolved external symbols.
+ */
+static inline int
+_lgi_luaL_ref(lua_State *L, int t)
+{
+    (void)t; /* Luau refs are registry-only; 't' is always LUA_REGISTRYINDEX */
+    int ref = lua_ref(L, -1);
+    lua_pop(L, 1);
+    return ref;
+}
+#define luaL_ref(L, t) _lgi_luaL_ref(L, t)
+
+static inline void
+_lgi_luaL_unref(lua_State *L, int t, int ref)
+{
+    (void)t;
+    lua_unref(L, ref);
+}
+#define luaL_unref(L, t, ref) _lgi_luaL_unref(L, t, ref)
+
+#define luaL_checkint(L, n) ((int)luaL_checkinteger(L, n))
+
 /* ─── Fix 2: lua_setfenv / lua_getfenv on userdata ─────────────────────────
  *
  * Define our compat wrappers BEFORE the #define macros so their bodies
  * resolve lua_setfenv / lua_getfenv to Luau's real C functions (not to
  * ourselves, which would be infinite recursion).
+ *
+ * Forward-declare the tag and type enum needed by _lgi_setfenv's
+ * GType-capture logic (the full definitions appear later in Fix 6).
  */
+#ifndef LGI_UDATA_TAG
+#define LGI_UDATA_TAG    1
+#endif
+
+/* Minimal forward enum — just the value _lgi_setfenv needs. */
+enum { _LGI_UDATA_RECORD_FWD = 7 };
 
 /*
  * Normalise a stack index to an absolute position.
@@ -91,6 +131,33 @@ _lgi_luau_absidx(lua_State *L, int idx)
                             : lua_gettop(L) + idx + 1);
 }
 
+/* Registry key for the centralized weak-keyed env table.
+ * Using __mode="k" means entries are automatically cleared by the GC when
+ * the userdata key becomes unreachable — no manual cleanup needed in the
+ * tag destructor. */
+#define LGI_ENVS_REGISTRY_KEY "_lgi_envs"
+
+/*
+ * _lgi_ensure_envtable — lazily create the weak-keyed env table in
+ * the registry.  Pushes the table onto the stack.
+ */
+static inline void
+_lgi_ensure_envtable(lua_State *L)
+{
+    lua_getfield(L, LUA_REGISTRYINDEX, LGI_ENVS_REGISTRY_KEY);
+    if (lua_isnil(L, -1)) {
+        lua_pop(L, 1);
+        lua_newtable(L);                                 /* envs            */
+        lua_newtable(L);                                 /* envs, mt        */
+        lua_pushliteral(L, "k");
+        lua_setfield(L, -2, "__mode");                   /* mt.__mode = "k" */
+        lua_setmetatable(L, -2);                         /* envs (weak-keyed) */
+        lua_pushvalue(L, -1);                            /* envs, envs      */
+        lua_setfield(L, LUA_REGISTRYINDEX, LGI_ENVS_REGISTRY_KEY);
+        /* envs remains on stack */
+    }
+}
+
 /*
  * _lgi_setfenv — drop-in replacement for lua_setfenv(L, idx).
  *
@@ -99,16 +166,45 @@ _lgi_luau_absidx(lua_State *L, int idx)
  *   After:  [...]          — table has been consumed
  *
  * Returns 1 on success, 0 if the object type does not support environments.
+ *
+ * For LGI-tagged userdata, the env table is stored in a centralized
+ * weak-keyed table (registry["_lgi_envs"][ud] = env) instead of directly
+ * in the registry.  This lets the GC clean entries automatically when the
+ * userdata dies — the tag destructor no longer needs any Lua stack ops.
+ *
+ * Additionally, for RECORD-type userdata, the GType from the env table's
+ * _gtype field is captured into the hidden prefix so the destructor can
+ * call g_boxed_free() without touching the Lua stack.
  */
 static inline int
 _lgi_setfenv(lua_State *L, int idx)
 {
     idx = _lgi_luau_absidx(L, idx);
     if (lua_type(L, idx) == LUA_TUSERDATA) {
-        void *ptr = lua_touserdata(L, idx);
-        lua_pushlightuserdata(L, ptr);  /* key                      */
-        lua_insert(L, -2);              /* [.., key, table]         */
-        lua_rawset(L, LUA_REGISTRYINDEX); /* registry[ptr] = table  */
+        int tbl = lua_gettop(L); /* absolute index of the env table at top */
+
+        /* ── Capture _gtype into the prefix for RECORD userdata ── */
+        if (lua_userdatatag(L, idx) == LGI_UDATA_TAG) {
+            void *raw = lua_touserdata(L, idx); /* real fn (before macro) → raw ptr */
+            uint8_t type_byte;
+            memcpy(&type_byte, raw, sizeof(type_byte));
+            if (type_byte == (uint8_t)_LGI_UDATA_RECORD_FWD) {
+                lua_getfield(L, tbl, "_gtype");
+                if (!lua_isnil(L, -1)) {
+                    GType gt = (GType)(uintptr_t)lua_touserdata(L, -1);
+                    memcpy((char *)raw + sizeof(void *), &gt, sizeof(gt));
+                }
+                lua_pop(L, 1); /* pop _gtype value */
+            }
+        }
+
+        /* ── Store envs[ud] = table in the weak-keyed table ── */
+        _lgi_ensure_envtable(L);         /* [..., table, envs]           */
+        int envs = lua_gettop(L);
+        lua_pushvalue(L, idx);           /* [..., table, envs, ud]       */
+        lua_pushvalue(L, tbl);           /* [..., table, envs, ud, table]*/
+        lua_rawset(L, envs);             /* [..., table, envs]           */
+        lua_pop(L, 2);                   /* [...]  (consumed envs + table) */
         return 1;
     }
     /* For functions / threads, delegate to Luau's real implementation.
@@ -124,29 +220,33 @@ _lgi_setfenv(lua_State *L, int idx)
  *   Before: [...]
  *   After:  [..., env_table]
  *
- * For userdata: pushes registry[ptr], or a freshly-created (and
- * registered) empty table if the entry is absent — matching Lua 5.1's
- * guarantee that every userdata always has an environment table.
+ * For userdata: pushes envs[ud], or a freshly-created (and stored)
+ * empty table if the entry is absent — matching Lua 5.1's guarantee
+ * that every userdata always has an environment table.
  */
 static inline void
 _lgi_getfenv(lua_State *L, int idx)
 {
     idx = _lgi_luau_absidx(L, idx);
     if (lua_type(L, idx) == LUA_TUSERDATA) {
-        void *ptr = lua_touserdata(L, idx);
-        lua_pushlightuserdata(L, ptr);
-        lua_rawget(L, LUA_REGISTRYINDEX);
+        _lgi_ensure_envtable(L);                     /* [..., envs]        */
+        int envs = lua_gettop(L);
+
+        lua_pushvalue(L, idx);                       /* [..., envs, ud]    */
+        lua_rawget(L, envs);                         /* [..., envs, env?]  */
 
         if (lua_isnil(L, -1)) {
-            /* First access: create and register a fresh env table so that
+            /* First access: create and store a fresh env table so that
              * subsequent getfenv calls return the same table object. */
-            lua_pop(L, 1);
-            lua_newtable(L);                         /* [.., t]            */
-            lua_pushlightuserdata(L, ptr);           /* [.., t, key]       */
-            lua_pushvalue(L, -2);                    /* [.., t, key, t]    */
-            lua_rawset(L, LUA_REGISTRYINDEX);        /* registry[ptr] = t  */
-            /* table 't' remains on the stack                              */
+            lua_pop(L, 1);                           /* [..., envs]        */
+            lua_newtable(L);                         /* [..., envs, t]     */
+            lua_pushvalue(L, idx);                   /* [..., envs, t, ud] */
+            lua_pushvalue(L, -2);                    /* [..., envs, t, ud, t] */
+            lua_rawset(L, envs);                     /* [..., envs, t]     */
+            /* fresh table 't' remains on the stack                        */
         }
+
+        lua_remove(L, envs);                        /* [..., env_table]   */
         return;
     }
     /* For functions / threads, delegate to Luau's real implementation. */
@@ -221,13 +321,26 @@ _lgi_lua_resume(lua_State *L, int narg)
  */
 
 /* Tag reserved for all lgi userdata (tags 0..LUA_UTAG_LIMIT-1 are available;
- * tag 0 is the default for lua_newuserdata, so we use tag 1). */
+ * tag 0 is the default for lua_newuserdata, so we use tag 1).
+ * (Already defined above in forward-declaration section.) */
+#ifndef LGI_UDATA_TAG
 #define LGI_UDATA_TAG    1
+#endif
 
-/* Hidden prefix size: one pointer-sized word prepended before lgi's data.
- * Only the first byte is used (LgiUdataType); the remaining bytes are pad.
- * Pointer-alignment ensures lgi's struct starts on a suitable boundary. */
-#define LGI_UDATA_PREFIX ((size_t)sizeof(void *))
+/* Hidden prefix size: two pointer-sized words prepended before lgi's data.
+ *
+ * Layout (x86-64, sizeof(void*) == 8):
+ *   raw[0]      = LgiUdataType byte  (cleanup type tag)
+ *   raw[1..7]   = padding
+ *   raw[8..15]  = GType              (only meaningful for RECORD; 0 otherwise)
+ *   raw[16..]   = visible_ptr        (what lgi sees via lua_touserdata)
+ *
+ * Pointer-alignment ensures lgi's struct starts on a suitable boundary.
+ * The extra word stores the GType for RECORD/ALLOCATED userdata so that
+ * the tag destructor can call g_boxed_free() without touching the Lua
+ * stack (which is unsafe during GC — see ludata.cpp:28-29).
+ */
+#define LGI_UDATA_PREFIX (2u * (size_t)sizeof(void *))
 
 /* Cleanup type stored in prefix byte 0. */
 typedef enum {
@@ -313,22 +426,32 @@ typedef struct {
 /*
  * lgi_udata_dtor — Luau tag-based destructor for all lgi userdata.
  *
- * Called by Luau's GC with:
- *   L   — the Lua state (safe for table ops, unsafe to allocate new objects)
- *   raw — raw allocation pointer (= raw_ptr, NOT the visible_ptr lgi uses)
+ * Called by Luau's GC during the sweep phase via luaU_freeudata().
  *
- * Layout reminder:
- *   raw[0]                    = LgiUdataType byte
- *   raw + LGI_UDATA_PREFIX    = visible_ptr (what lgi calls lua_touserdata)
+ * CRITICAL CONSTRAINT (ludata.cpp:28-29):
+ *   "access to L here is highly unsafe since this is called during
+ *    internal GC traversal"
  *
- * Two invariants guaranteed before this call:
- *   1. The userdata memory is still fully allocated (not yet freed).
- *   2. Any registry entry at registry[lightuserdata(visible_ptr)] that was
- *      set by _lgi_setfenv is still present (we clean it up here).
+ * Therefore this function performs ONLY pure C cleanup (g_object_unref,
+ * g_base_info_unref, etc.).  It makes ZERO lua_push* / lua_raw* calls.
+ *
+ * Env-table cleanup is handled automatically: env tables are stored in
+ * a weak-keyed table (registry["_lgi_envs"]) whose entries are cleared
+ * by the GC's atomic phase before this destructor runs during sweep.
+ *
+ * For RECORD/ALLOCATED userdata, the GType needed for g_boxed_free() was
+ * captured into the hidden prefix by _lgi_setfenv at creation time.
+ *
+ * Layout:
+ *   raw[0]                     = LgiUdataType byte
+ *   raw + sizeof(void*)        = GType (for RECORD; 0 otherwise)
+ *   raw + LGI_UDATA_PREFIX     = visible_ptr (lgi's struct data)
  */
 static inline void
 lgi_udata_dtor(lua_State *L, void *raw)
 {
+    (void)L; /* intentionally unused — Lua stack ops are unsafe here */
+
     uint8_t    type;
     void      *visible = (char *)raw + LGI_UDATA_PREFIX;
 
@@ -337,7 +460,6 @@ lgi_udata_dtor(lua_State *L, void *raw)
     switch ((LgiUdataType)type) {
 
     case LGI_UDATA_GOBJECT: {
-        /* visible_ptr points to a single gpointer (the GObject address). */
         gpointer obj;
         memcpy(&obj, visible, sizeof(obj));
         if (obj)
@@ -346,7 +468,6 @@ lgi_udata_dtor(lua_State *L, void *raw)
     }
 
     case LGI_UDATA_GIINFO: {
-        /* visible_ptr points to a GIBaseInfo* pointer. */
         GIBaseInfo *info;
         memcpy(&info, visible, sizeof(info));
         if (info)
@@ -355,7 +476,6 @@ lgi_udata_dtor(lua_State *L, void *raw)
     }
 
     case LGI_UDATA_GIINFOS: {
-        /* visible_ptr is an Infos struct; only the first field matters. */
         _LgiInfosHdr hdr;
         memcpy(&hdr, visible, sizeof(hdr));
         if (hdr.info)
@@ -372,7 +492,6 @@ lgi_udata_dtor(lua_State *L, void *raw)
     }
 
     case LGI_UDATA_MODULE: {
-        /* visible_ptr points to a GModule* pointer. */
         GModule *mod;
         memcpy(&mod, visible, sizeof(mod));
         if (mod)
@@ -381,28 +500,18 @@ lgi_udata_dtor(lua_State *L, void *raw)
     }
 
     case LGI_UDATA_CALLABLE: {
-        /* visible_ptr is a Callable struct.  Read the full mirror so we can
-         * walk retval.ti and params[*].ti — all GITypeInfo* refs needing
-         * g_base_info_unref.  The params array lives in the same userdata
-         * block (callable.c:97-98), so the pointer is valid here. */
         _LgiCallable callable;
         int           nargs, i;
         memcpy(&callable, visible, sizeof(callable));
 
-        /* Unref the GICallableInfo embedded in the Callable header. */
         if (callable.info)
             g_base_info_unref((GIBaseInfo *)callable.info);
 
-        /* nargs occupies bits 2..7 of _bits (little-endian bit packing):
-         *   has_self:1, throws:1, nargs:6, ignore_retval:1, ... */
         nargs = (int)((callable._bits >> 2) & 0x3Fu);
 
-        /* Unref the return-value GITypeInfo if one was set. */
         if (callable.retval.ti)
             g_base_info_unref(callable.retval.ti);
 
-        /* Unref each parameter's GITypeInfo.  params[] is Param[nargs]
-         * allocated in the tail of the same userdata block. */
         if (callable.params) {
             for (i = 0; i < nargs; i++) {
                 _LgiParam param;
@@ -415,27 +524,16 @@ lgi_udata_dtor(lua_State *L, void *raw)
     }
 
     case LGI_UDATA_RECORD: {
-        /* For ALLOCATED records, recover the boxed GType from the env
-         * table (still in the registry at this point) and call g_boxed_free.
-         * EMBEDDED / NESTED / EXTERNAL records either store data inline or
-         * point into a parent and require no explicit C-level free. */
+        /* For ALLOCATED records, read the GType from the hidden prefix
+         * (captured by _lgi_setfenv at creation time) and call g_boxed_free.
+         * No Lua API calls needed. */
         _LgiRecordHdr rec;
         memcpy(&rec, visible, sizeof(rec));
         if (rec.store == _LGI_RECORD_ALLOCATED && rec.addr) {
-            /* Key must be `raw` — _lgi_setfenv stores env tables keyed
-             * by the real lua_touserdata pointer (= raw), not visible. */
-            lua_pushlightuserdata(L, raw);
-            lua_rawget(L, LUA_REGISTRYINDEX);   /* push env table or nil */
-            if (!lua_isnil(L, -1)) {
-                lua_getfield(L, -1, "_gtype");
-                GType gtype = (GType)(uintptr_t)lua_touserdata(L, -1);
-                lua_pop(L, 2);                  /* pop _gtype + env table */
-                if (G_TYPE_IS_BOXED(gtype))
-                    g_boxed_free(gtype, rec.addr);
-                /* else: unknown type — g_free would be wrong; accept leak */
-            } else {
-                lua_pop(L, 1);                  /* pop nil */
-            }
+            GType gtype;
+            memcpy(&gtype, (char *)raw + sizeof(void *), sizeof(gtype));
+            if (gtype && G_TYPE_IS_BOXED(gtype))
+                g_boxed_free(gtype, rec.addr);
         }
         break;
     }
@@ -444,15 +542,8 @@ lgi_udata_dtor(lua_State *L, void *raw)
         break;
     }
 
-    /*
-     * Always wipe the registry env-table entry installed by _lgi_setfenv /
-     * _lgi_getfenv.  The key must be `raw` — _lgi_setfenv is defined before
-     * the lua_touserdata macro, so it calls the real function which returns
-     * the raw allocation pointer (not visible = raw + PREFIX).
-     */
-    lua_pushlightuserdata(L, raw);
-    lua_pushnil(L);
-    lua_rawset(L, LUA_REGISTRYINDEX);
+    /* No manual env-table cleanup needed — the weak-keyed _lgi_envs
+     * table handles this automatically during the GC atomic phase. */
 }
 
 /* ─── Fix 6a: lua_newuserdata ────────────────────────────────────────────────
@@ -496,8 +587,9 @@ _lgi_newuserdata(lua_State *L, size_t sz)
 
     raw = (char *)lua_newuserdatatagged(L, LGI_UDATA_PREFIX + sz,
                                         LGI_UDATA_TAG);
-    raw[0] = (char)LGI_UDATA_NONE;   /* default: no C cleanup */
-    return raw + LGI_UDATA_PREFIX;   /* visible_ptr */
+    raw[0] = (char)LGI_UDATA_NONE;              /* default: no C cleanup */
+    memset(raw + sizeof(void *), 0, sizeof(GType)); /* clear GType slot   */
+    return raw + LGI_UDATA_PREFIX;              /* visible_ptr */
 }
 
 #ifdef lua_newuserdata

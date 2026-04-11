@@ -122,7 +122,7 @@ draw_surface_from_pixbuf(GdkPixbuf *buf)
                 r = r * alpha;
                 g = g * alpha;
                 b = b * alpha;
-                *cairo++ = (a << 24) | (r << 16) | (g << 8) | b;
+                *cairo++ = ((uint32_t)a << 24) | ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
             }
         }
         pixels += pix_stride;

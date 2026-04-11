@@ -75,7 +75,8 @@ Luau has no `luaL_dostring` / `luaL_loadfile` - this acts as a drop-in replaceme
 accordingly.
 
 On LUA_OK any values returned by the chunk are left on the stack.
-On failure the error is printed; popped from the stack; and the status returned.
+On failure, the error message is left ontop of the stack and the status returned,
+matching Lua 5.x's `luaL_dostring` semantics.
 */
 static inline int luaA_dostring_named(lua_State* L, const char* src, const char* chunkname) {
     size_t bcLen = 0;
@@ -83,17 +84,10 @@ static inline int luaA_dostring_named(lua_State* L, const char* src, const char*
     char* bc = luau_compile(src, strlen(src), NULL, &bcLen);
     int status = luau_load(L, chunkname, bc, bcLen, 0);
     free(bc);
-    if (status != LUA_OK) {
-        printf("  [load err] %s\n", lua_tostring(L, -1));
-        lua_pop(L, 1);
-        return status;
-    }
+    if (status != LUA_OK)
+        return status;  /* error message should already be on the stack from luau_load */
     status = lua_pcall(L, 0, LUA_MULTRET, 0);
-    if (status != LUA_OK) {
-        printf("  [runtime err] %s\n", lua_tostring(L, -1));
-        lua_pop(L, 1);
-    }
-    return status;
+    return status;      /* on error, pcall leaves error message on the stack */
 }
 
 /*
@@ -101,7 +95,7 @@ Luau has no `luaL_dostring` / `luaL_loadfile` - this acts as a drop-in replaceme
 accordingly.
 
 On LUA_OK any values returned by the chunk are left on the stack.
-On failure the error is printed; popped from the stack; and the status returned.
+On failure the error message is left on top of the stack and the status is returned.
 */
 static inline int luaA_dostring(lua_State* L, const char* src) {
     return luaA_dostring_named(L, src, "=[C]");

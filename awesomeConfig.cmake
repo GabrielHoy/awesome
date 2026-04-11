@@ -405,6 +405,12 @@ target_compile_options(corelgiluau PRIVATE
     -Wno-unused-parameter
     -Wno-missing-prototypes
     -Wno-strict-prototypes
+    # lgi/marshal.c accesses GIArgument union members via pointer arithmetic
+    # that produces misaligned addresses — a pre-existing upstream issue.
+    # Disable the alignment UBSan check only for this target so it doesn't
+    # drown out real findings from the main awesome binary.
+    # (-fno-sanitize=alignment is a no-op in non-sanitized builds.)
+    -fno-sanitize=alignment
 )
 
 target_link_libraries(corelgiluau PRIVATE

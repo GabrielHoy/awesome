@@ -75,6 +75,7 @@
 #include <glib.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include <basedir_fs.h>
 
@@ -486,6 +487,229 @@ luaA_loadstring(lua_State *L)
 }
 
 /**
+ * loadfile(filename)
+ *
+ * Luau omits loadfile() as a Lua global.  We wrap the C-level luaA_loadfile()
+ * from `luau_compat.h` so that lib/ code like awful.util.checkfile() works.
+ * Returns a function on success, nil+errmsg tuple on failure.
+ */
+static int
+luaA_loadfile_lua(lua_State *L)
+{
+    const char *filename = luaL_optstring(L, 1, NULL);
+    int status = luaA_loadfile(L, filename);
+
+    if (status == LUA_OK)
+        return 1;   /* compiled function is on the stack */
+
+    /* luaA_loadfile pushed the error string; return nil, errmsg */
+    lua_pushnil(L);
+    lua_insert(L, -2);  /* [nil, errmsg] */
+    return 2;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * debug.getinfo(level, what) — Lua 5.1-compatible shim over Luau's debug API.
+ *
+ * Luau provides debug.info() which returns multiple values; Lua 5.1 provides
+ * debug.getinfo() which returns a table with named fields.  AwesomeWM's Lua
+ * code accesses .source, .name, etc. on the result, so we must return a table.
+ *
+ * Supported `what` characters (matching Lua 5.1):
+ *   "S" → source, short_src, what, linedefined, lastlinedefined
+ *   "n" → name, namewhat
+ *   "l" → currentline
+ *   "u" → nups
+ *   "a" → nparams, isvararg  (Luau extension, shouuuld be harmless to include)
+ *   "f" → func  (not implemented — AwesomeWM doesn't use it)
+ * ──────────────────────────────────────────────────────────────────────────── */
+static int
+luaA_debug_getinfo(lua_State *L)
+{
+    int level;
+
+    if (lua_isnumber(L, 1)) {
+        level = (int)lua_tointeger(L, 1);
+    } else {
+        luaL_argerror(L, 1, "number expected (function argument not supported)");
+        return 0;
+    }
+
+    const char *what = luaL_optstring(L, 2, "Snl");
+
+    /*
+     * Build the Luau-compatible option string for lua_getinfo.
+     * Luau's lua_getinfo accepts: s l n u a f (lowercase).
+    */
+    char luau_opts[16];
+    int oi = 0;
+    for (const char *p = what; *p && oi < 14; p++) {
+        switch (*p) {
+        case 'S': case 's': luau_opts[oi++] = 's'; break;
+        case 'l': case 'L': luau_opts[oi++] = 'l'; break;
+        case 'n':           luau_opts[oi++] = 'n'; break;
+        case 'u':           luau_opts[oi++] = 'u'; break;
+        case 'a':           luau_opts[oi++] = 'a'; break;
+        case 'f':           luau_opts[oi++] = 'f'; break;
+        default: break;  /* ignore unknown chars */
+        }
+    }
+    luau_opts[oi] = '\0';
+
+    lua_Debug ar;
+    memset(&ar, 0, sizeof(ar));
+    if (!lua_getinfo(L, level, luau_opts, &ar)) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    lua_newtable(L);
+
+    for (const char *p = what; *p; p++) {
+        switch (*p) {
+        case 'S': case 's':
+            lua_pushstring(L, ar.source ? ar.source : "=(?)");
+            lua_setfield(L, -2, "source");
+            lua_pushstring(L, ar.short_src);
+            lua_setfield(L, -2, "short_src");
+            lua_pushstring(L, ar.what ? ar.what : "Lua");
+            lua_setfield(L, -2, "what");
+            lua_pushinteger(L, ar.linedefined);
+            lua_setfield(L, -2, "linedefined");
+            lua_pushinteger(L, ar.linedefined); /* Luau has no lastlinedefined */
+            lua_setfield(L, -2, "lastlinedefined");
+            break;
+        case 'n':
+            if (ar.name)
+                lua_pushstring(L, ar.name);
+            else
+                lua_pushnil(L);
+            lua_setfield(L, -2, "name");
+            lua_pushliteral(L, ""); /* Luau has no namewhat */
+            lua_setfield(L, -2, "namewhat");
+            break;
+        case 'l': case 'L':
+            lua_pushinteger(L, ar.currentline);
+            lua_setfield(L, -2, "currentline");
+            break;
+        case 'u':
+            lua_pushinteger(L, ar.nupvals);
+            lua_setfield(L, -2, "nups");
+            break;
+        case 'a':
+            lua_pushinteger(L, ar.nparams);
+            lua_setfield(L, -2, "nparams");
+            lua_pushboolean(L, ar.isvararg);
+            lua_setfield(L, -2, "isvararg");
+            break;
+        default:
+            break;
+        }
+    }
+    return 1;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * os.date(format, time) — Lua 5.1-compatible replacement.
+ *
+ * Luau's built-in os.date whitelists a limited set of strftime specifiers
+ * (defined as LUA_STRFTIMEOPTIONS = "aAbBcdHIjmMpSUwWxXyYzZ%").  Common
+ * POSIX specifiers like %T, %F, %V, %e are rejected.  AwesomeWM uses %T
+ * in gears.debug and %V in wibox.widget.calendar.
+ *
+ * This replacement calls strftime() directly without a whitelist, matching
+ * Lua 5.1 behaviour (which delegates to the platform's strftime).
+ * ──────────────────────────────────────────────────────────────────────────── */
+static int
+luaA_os_date(lua_State *L)
+{
+    const char *fmt = luaL_optstring(L, 1, "%c");
+    time_t t;
+
+    if (lua_isnoneornil(L, 2))
+        t = time(NULL);
+    else
+        t = (time_t)luaL_checknumber(L, 2);
+
+    struct tm tm_buf;
+    struct tm *stm;
+    int utc = 0;
+
+    if (*fmt == '!') {
+        utc = 1;
+        fmt++;
+    }
+
+    if (utc)
+        stm = gmtime_r(&t, &tm_buf);
+    else
+        stm = localtime_r(&t, &tm_buf);
+
+    if (!stm) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    /* "*t" → return table (same as Luau's built-in) */
+    if (strcmp(fmt, "*t") == 0) {
+        lua_createtable(L, 0, 9);
+        lua_pushinteger(L, stm->tm_sec);   lua_setfield(L, -2, "sec");
+        lua_pushinteger(L, stm->tm_min);   lua_setfield(L, -2, "min");
+        lua_pushinteger(L, stm->tm_hour);  lua_setfield(L, -2, "hour");
+        lua_pushinteger(L, stm->tm_mday);  lua_setfield(L, -2, "day");
+        lua_pushinteger(L, stm->tm_mon+1); lua_setfield(L, -2, "month");
+        lua_pushinteger(L, stm->tm_year + 1900); lua_setfield(L, -2, "year");
+        lua_pushinteger(L, stm->tm_wday+1);lua_setfield(L, -2, "wday");
+        lua_pushinteger(L, stm->tm_yday+1);lua_setfield(L, -2, "yday");
+        lua_pushboolean(L, stm->tm_isdst); lua_setfield(L, -2, "isdst");
+        return 1;
+    }
+
+    /* Format string → strftime w/o specifier whitelist */
+    char buf[512];
+    size_t n = strftime(buf, sizeof(buf), fmt, stm);
+    if (n == 0 && fmt[0] != '\0') {
+        /*
+         * strftime returned 0 with a non-empty format; buffer too small.
+         * Fall back to a larger heap allocation.
+        */
+        size_t bigsz = 2048;
+        char *big = (char *)malloc(bigsz);
+        if (big) {
+            n = strftime(big, bigsz, fmt, stm);
+            lua_pushlstring(L, big, n);
+            free(big);
+        } else {
+            lua_pushliteral(L, "");
+        }
+    } else {
+        lua_pushlstring(L, buf, n);
+    }
+    return 1;
+}
+
+/**
+ * dofile(filename)
+ *
+ * Luau omits dofile() as a Lua global.  This implements the Lua 5.1 spec:
+ * "Opens the named file and executes its contents as a Lua chunk.  Returns
+ * all values returned by the chunk.  On errors, propagates the error."
+ */
+static int
+luaA_dofile(lua_State *L)
+{
+    const char *filename = luaL_optstring(L, 1, NULL);
+    lua_settop(L, 1);
+    int status = luaA_loadfile(L, filename);
+    if (status != LUA_OK) {
+        lua_error(L); /* loadfile pushed an error string — noreturn */
+        return 0;     /* unreachable; silences compiler */
+    }
+    lua_call(L, 0, LUA_MULTRET);
+    return lua_gettop(L) - 1; /* return everything above the filename slot */
+}
+
+/**
  * Replace various standards Lua functions with our own.
  * \param L The Lua VM state.
  */
@@ -509,6 +733,14 @@ luaA_fixups(lua_State *L)
     lua_setglobal(L, "loadstring");
     lua_setglobal(L, "load");
 
+    /* Expose loadfile — used by lib/awful/util.lua:checkfile() */
+    luaA_pushcfunction(L, luaA_loadfile_lua);
+    lua_setglobal(L, "loadfile");
+
+    /* Expose dofile — used by lib/beautiful/init.lua to load theme files */
+    luaA_pushcfunction(L, luaA_dofile);
+    lua_setglobal(L, "dofile");
+
     /* export string.wlen */
     lua_getglobal(L, "string");
     luaA_pushcfunction(L, luaA_mbstrlen);
@@ -517,10 +749,23 @@ luaA_fixups(lua_State *L)
     /* replace type */
     luaA_pushcfunction(L, luaAe_type);
     lua_setglobal(L, "type");
-    /* supplement Lua 5.x's os library to Luau state - os.getenv */
+    /* supplement Lua 5.x's os library to Luau state */
     lua_getglobal(L, "os");
     luaA_pushcfunction(L, luaA_os_getenv);
     lua_setfield(L, -2, "getenv");
+    /* Replace os.date with our strftime-passthrough version so that
+     * POSIX specifiers like %T and %V work (Luau's built-in rejects them). */
+    luaA_pushcfunction(L, luaA_os_date);
+    lua_setfield(L, -2, "date");
+    lua_pop(L, 1);
+
+    /* Install debug.getinfo — Luau only provides debug.info (returns multiple
+     * values); AwesomeWM needs debug.getinfo (returns a table). */
+    lua_getglobal(L, "debug");
+    if (lua_istable(L, -1)) {
+        luaA_pushcfunction(L, luaA_debug_getinfo);
+        lua_setfield(L, -2, "getinfo");
+    }
     lua_pop(L, 1);
 }
 
@@ -1297,20 +1542,27 @@ luaA_init(xdgHandle* xdg, string_array_t *searchpath)
     if (LUA_TTABLE == lua_type(L, -1))
     {
         lua_getfield(L, -1, "path");
+        /*
+         * Prepend our lgi Lua source directory so that require('lgi') loads
+         * the Luau-compatible lgi from third-party/lgi/ rather than the
+         * system Lua 5.1 lgi at /usr/share/lua/5.1/.
+         */
+        lua_pushliteral(L, BUILD_LGI_LUA_PATH "/?.lua;" BUILD_LGI_LUA_PATH "/?/init.lua;");
+        lua_pushvalue(L, -2);        /* [..., lgi_path, old_path] */
+        lua_remove(L, -3);           /* remove old_path original  */
+        lua_concat(L, 2);            /* lgi_path .. old_path       */
         add_to_search_path(L, searchpath, true);
         lua_setfield(L, -2, "path");
 
         lua_getfield(L, -1, "cpath");
-        /* 
-         * Prepend the build-time lgi directory so corelgiluau.so is found
-         * before the system corelgilua51.so
-        */
-        lua_pushliteral(L, BUILD_LGI_PATH "/?.so");
+        /*
+         * Prepend the build directory so that require('lgi.corelgilua51')
+         * resolves to <build>/lgi/corelgilua51.so before the system one.
+         */
+        lua_pushliteral(L, BUILD_LGI_PATH "/?.so;");
         lua_pushvalue(L, -2);                  /* [..., new_entry, old_cpath] */
         lua_remove(L, -3);                     /* remove old_cpath original  */
-        lua_pushliteral(L, ";");
-        lua_insert(L, -2);                     /* [..., new_entry, ";", old_cpath] */
-        lua_concat(L, 3);                        /* new_entry ; old_cpath      */
+        lua_concat(L, 2);                      /* new_entry .. old_cpath     */
         add_to_search_path(L, searchpath, false);
         lua_setfield(L, -2, "cpath");
     }

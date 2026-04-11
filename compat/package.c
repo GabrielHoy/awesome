@@ -423,5 +423,26 @@ luaA_package_open(lua_State *L)
     lua_setfield(L, -2, "loaders");    /* pkg.loaders   = searchers; [loaded, pkg] */
 
     lua_setglobal(L, "package");       /* _G.package = pkg; [loaded] */
+
+    /*
+     * Seed _LOADED with built-in modules so that `require('package')`,
+     * `require('io')`, etc. return the corresponding globals — matching
+     * Lua 5.1 behaviour.  lgi/init.lua line 16 does `require 'package'`
+     * which would fail without this.
+     */
+    static const char *const builtins[] = {
+        "package", "io", "os", "string", "table", "math",
+        "coroutine", "debug", NULL
+    };
+    for (int i = 0; builtins[i]; i++) {
+        lua_getglobal(L, builtins[i]);   /* [loaded, module_or_nil] */
+        if (!lua_isnil(L, -1)) {
+            lua_setfield(L, -2, builtins[i]); /* loaded[name] = module */
+        }
+        else {
+            lua_pop(L, 1);
+        }
+    }
+
     lua_pop(L, 1);                     /* [] */
 }
